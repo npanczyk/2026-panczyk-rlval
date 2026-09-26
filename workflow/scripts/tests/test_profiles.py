@@ -5,6 +5,7 @@ from scipy.interpolate import interp1d
 import numpy as np
 import loops
 import env
+import fuzzing
 
 
 def test_get_profile():
@@ -49,8 +50,14 @@ def test_multi_drum_runthrough(quick_kwargs, tmp_path, monkeypatch):
     )
     assert (run_folder / "models" / "best_model.zip").exists()
 
+    disturbance_dist = fuzzing.DisturbanceDistribution(
+            Do=fuzzing.Do(sigma_p=0.05, sigma_dp=0.05, sigma_drum=0.05),
+            Da=fuzzing.Da(sigma_dtheta=0),
+            Ds=fuzzing.Ds(),
+        )
+    
     history = loops.test_trained_rl(
-        env_type=env.HolosMulti, load_dir=run_folder, save_dir=run_folder, env_kwargs=testing_kwargs
+        env_type=env.HolosMulti, load_dir=run_folder, save_dir=run_folder, env_kwargs=testing_kwargs, disturbance_distribution=disturbance_dist
     )
     assert len(history) > 0
     assert "actual_power" in history.columns

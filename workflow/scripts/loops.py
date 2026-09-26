@@ -24,6 +24,8 @@ from stable_baselines3.common.callbacks import EvalCallback, CheckpointCallback
 from stable_baselines3.common.vec_env import VecMonitor
 from stable_baselines3.common.monitor import Monitor
 from accessories import find_latest_file, metrics
+from env import Undisturbed, make_undisturbed_env
+from functools import partial
 
 
 def train_rl(env_type, save_dir, env_kwargs, total_timesteps=int(2e6), n_envs=10):
@@ -54,7 +56,10 @@ def train_rl(env_type, save_dir, env_kwargs, total_timesteps=int(2e6), n_envs=10
     log_dir = save_dir / "logs/"
 
     # set up a vectorized environment to allow for parallel training
-    vec_env = make_vec_env(env_type, n_envs=n_envs, env_kwargs=env_kwargs)
+    vec_env = make_vec_env(
+        partial(make_undisturbed_env, env_type), 
+        n_envs=n_envs, 
+        env_kwargs=env_kwargs)
     vec_env = VecMonitor(vec_env, filename=str(log_dir / "vec"))
 
     # initialize the model
@@ -67,7 +72,7 @@ def train_rl(env_type, save_dir, env_kwargs, total_timesteps=int(2e6), n_envs=10
     )
 
     # set up the evaluation environment
-    eval_env = Monitor(env_type(**env_kwargs), filename=str(log_dir / "eval"))
+    eval_env = Monitor(make_undisturbed_env(env_type, **env_kwargs), filename=str(log_dir / "eval"))
 
     # define the evaluation frequency per total timesteps (sum of timesteps across all parallel envs)
     eval_freq = min(
@@ -90,7 +95,7 @@ def train_rl(env_type, save_dir, env_kwargs, total_timesteps=int(2e6), n_envs=10
     return
 
 
-def rl_control_loop(model: sb3.PPO, env):
+def rollout(model: sb3.PPO, env, disturbance_distribution):
     """Run one deterministic rollout of `model` on `env` to termination.
 
     Standard gym inference loop: reset, then step with the model's
@@ -103,17 +108,25 @@ def rl_control_loop(model: sb3.PPO, env):
     Args:
         model: Trained SB3 model with a `.predict()` method.
         env: Gym environment instance (not vectorized).
+        disturbance_distribution (DisturbanceDistribution object from fuzzing.py): holds disturbance distributions for observations, actions, and states
     """
+    # get disturbance (noise) for the first observation
+    xo0 = disturbance_distribution.Do.sample()
     obs, _ = env.reset()
     done = False
     while not done:
         action, _states = model.predict(obs, deterministic=True)
-        obs, _, terminated, truncated, _ = env.step(action)
+        # get disturbances for the step
+        x = disturbance_distribution.sample(env.state, action)
+        obs, _, terminated, truncated, _ = env.step(
+            action=action,
+            disturbance = x
+        )
         done = terminated or truncated
     env.render()
 
 
-def test_trained_rl(env_type, load_dir, save_dir, env_kwargs):
+def test_trained_rl(env_type, load_dir, save_dir, env_kwargs, disturbance_distribution):
     """Evaluate the most recent trained checkpoint and report control metrics.
 
     Loads the newest .zip checkpoint in `save_dir/models/`, runs it
@@ -124,8 +137,9 @@ def test_trained_rl(env_type, load_dir, save_dir, env_kwargs):
         env_type: Environment class to construct for testing.
         load_dir: Path to load the model from.
         save_dir: Path to save the file to a
-        env_kwargs: Kwargs passed to `env_type`; must include
-            'save_dir' (Path).
+        env_kwargs: Kwargs passed to `env_type`
+        disturbance_distribution (DisturbanceDistribution object from fuzzing.py): holds disturbance distributions for observations, actions, and states
+
 
     Returns:
         DataFrame of the full run history (state/action trace) for
@@ -136,7 +150,7 @@ def test_trained_rl(env_type, load_dir, save_dir, env_kwargs):
     model = sb3.PPO.load(model_path, device="cpu")
 
     test_env = env_type(**env_kwargs, save_dir=save_dir)
-    rl_control_loop(model, test_env)
+    rollout(model, test_env, disturbance_distribution)
 
     history_path = find_latest_file(save_dir, pattern="run_history*.csv")
     history = pd.read_csv(history_path)

@@ -6,10 +6,15 @@ import gymnasium as gym
 import numpy as np
 import pandas as pd
 import pytest
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import MagicMock, patch, call, ANY
 
 import accessories
 import loops
+import fuzzing
+import env
+from scipy.interpolate import interp1d
+from functools import partial
+from env import make_undisturbed_env
 
 
 # ---------------------------------------------------------------------------
@@ -21,10 +26,11 @@ def env_kwargs():
 
 
 class DummyDictEnv(gym.Env):
-    """Minimal Dict-observation env so PPO('MultiInputPolicy', ...) is valid
-    and a real training test finishes quickly."""
+    """Minimal Dict-observation env matching HolosMulti's constructor/step
+    signature, so it's a valid stand-in for train_rl/test_trained_rl, which
+    now assume HolosMulti-shaped envs specifically."""
 
-    def __init__(self, run_path=None):
+    def __init__(self, run_path=None, save_dir=None):
         self.observation_space = gym.spaces.Dict(
             {"obs": gym.spaces.Box(low=-1, high=1, shape=(2,), dtype=np.float32)}
         )
@@ -35,7 +41,7 @@ class DummyDictEnv(gym.Env):
         self._t = 0
         return {"obs": self.observation_space["obs"].sample()}, {}
 
-    def step(self, action):
+    def step(self, action, disturbance):
         self._t += 1
         obs = {"obs": self.observation_space["obs"].sample()}
         terminated = self._t >= 3
@@ -69,10 +75,14 @@ def test_train_rl_wires_up_components_correctly(tmp_path, env_kwargs):
         # dirs created
         assert (save_dir / "models").exists()
 
-        # vec env built with requested env_type/n_envs/kwargs
-        mock_make_vec_env.assert_called_once_with(
-            DummyDictEnv, n_envs=10, env_kwargs=env_kwargs
-        )
+        mock_make_vec_env.assert_called_once()
+        call_args = mock_make_vec_env.call_args
+        factory = call_args.args[0]
+        assert isinstance(factory, partial)
+        assert factory.func is make_undisturbed_env
+        assert factory.args == (DummyDictEnv,)
+        assert call_args.kwargs["n_envs"] == 10
+        assert call_args.kwargs["env_kwargs"] == env_kwargs
 
         # PPO constructed on the (wrapped) vec env
         assert mock_ppo_cls.call_args.args[0] == "MultiInputPolicy"
@@ -114,22 +124,22 @@ def test_rl_control_loop_runs_until_terminated_and_renders_once():
 
     mock_env = MagicMock()
     mock_env.reset.return_value = ({"obs": 0}, {})
-    # not terminated for 2 steps, then terminated on the 3rd
     mock_env.step.side_effect = [
         ({"obs": 1}, 0.0, False, False, {}),
         ({"obs": 2}, 0.0, False, False, {}),
         ({"obs": 3}, 0.0, True, False, {}),
     ]
 
-    loops.rl_control_loop(mock_model, mock_env)
+    mock_disturbance_dist = MagicMock()
+    loops.rollout(mock_model, mock_env, mock_disturbance_dist)
 
     assert mock_env.step.call_count == 3
     assert mock_model.predict.call_count == 3
     mock_model.predict.assert_called_with({"obs": 2}, deterministic=True)
-    mock_env.render.assert_called_once()  # called once, after the loop
+    mock_env.render.assert_called_once()
 
 
-def test_rl_control_loop_stops_on_truncated():
+def test_rollout_stops_on_truncated():
     mock_model = MagicMock()
     mock_model.predict.return_value = (0, None)
 
@@ -137,10 +147,42 @@ def test_rl_control_loop_stops_on_truncated():
     mock_env.reset.return_value = ({"obs": 0}, {})
     mock_env.step.return_value = ({"obs": 1}, 0.0, False, True, {})  # truncated
 
-    loops.rl_control_loop(mock_model, mock_env)
+    mock_disturbance_dist = MagicMock()
+
+    loops.rollout(mock_model, mock_env, mock_disturbance_dist)
 
     assert mock_env.step.call_count == 1
     mock_env.render.assert_called_once()
+
+def test_rollout_applies_observation_noise(tmp_path):
+    """Integration check: confirms rollout() -> env.step() -> _get_observation
+    actually applies xo, by comparing observed p against true p at each step.
+    A continuous Gaussian sample being exactly 0 has probability 0, so any
+    nonzero sigma_p should produce a mismatch almost surely."""
+    profile = interp1d([0, 5], [1, 1])
+    test_env = env.HolosMulti(profile=profile, episode_length=3, save_dir=tmp_path)
+
+    mock_model = MagicMock()
+    mock_model.predict.return_value = (np.zeros(8), None)
+
+    disturbance_dist = fuzzing.DisturbanceDistribution(
+        Do=fuzzing.Do(sigma_p=0.05, sigma_dp=0.05, sigma_drum=0.05),
+        Da=fuzzing.Da(sigma_dtheta=0),
+        Ds=fuzzing.Ds(),
+    )
+
+    seen = []
+    real_get_observation = test_env._get_observation
+    def spy(xo):
+        obs = real_get_observation(xo)
+        seen.append((obs["p"][0], test_env._p))  # (observed, true) at this instant
+        return obs
+    test_env._get_observation = spy
+
+    loops.rollout(mock_model, test_env, disturbance_dist)
+
+    assert any(not np.isclose(obs_p, true_p) for obs_p, true_p in seen), \
+        "Expected observed p to differ from true p due to sensor noise"
 
 
 # ---------------------------------------------------------------------------
@@ -149,37 +191,37 @@ def test_rl_control_loop_stops_on_truncated():
 
 
 def test_test_trained_rl_orchestrates_load_run_and_metrics(tmp_path, env_kwargs):
-    save_dir = tmp_path
+    load_dir = save_dir = tmp_path
     fake_history = pd.DataFrame({"time": [0, 1], "actual_power": [1.0, 1.0]})
+    mock_disturbance_dist = MagicMock()
 
     with patch("loops.find_latest_file") as mock_find_latest, patch(
         "loops.sb3.PPO.load"
-    ) as mock_ppo_load, patch("loops.rl_control_loop") as mock_control_loop, patch(
+    ) as mock_ppo_load, patch("loops.rollout") as mock_control_loop, patch(
         "loops.metrics", return_value=(0.1, 0.2, 0.3, 0.4)
     ) as mock_calc_metrics, patch(
         "loops.pd.read_csv", return_value=fake_history
     ) as mock_read_csv:
 
         mock_find_latest.side_effect = [
-            tmp_path / "models" / "best_model.zip",  # model lookup
-            tmp_path / "run_history_001.csv",  # history lookup
+            tmp_path / "models" / "best_model.zip",
+            tmp_path / "run_history_001.csv",
         ]
         mock_model = MagicMock()
         mock_ppo_load.return_value = mock_model
 
-        result = loops.test_trained_rl(DummyDictEnv, save_dir, env_kwargs)
-
-        mock_find_latest.assert_has_calls(
-            [
-                call(tmp_path / "models", pattern="*.zip"),
-                call(tmp_path, pattern="run_history*.csv"),
-            ]
+        result = loops.test_trained_rl(
+            DummyDictEnv, load_dir, save_dir, env_kwargs, mock_disturbance_dist
         )
+
+        mock_find_latest.assert_has_calls([
+            call(tmp_path / "models", pattern="*.zip"),
+            call(tmp_path, pattern="run_history*.csv"),
+        ])
         mock_ppo_load.assert_called_once_with(
             tmp_path / "models" / "best_model.zip", device="cpu"
         )
-        mock_control_loop.assert_called_once()
-        assert mock_control_loop.call_args.args[0] is mock_model
+        mock_control_loop.assert_called_once_with(mock_model, ANY, mock_disturbance_dist)
         mock_read_csv.assert_called_once_with(tmp_path / "run_history_001.csv")
         mock_calc_metrics.assert_called_once_with(fake_history)
         assert result is fake_history

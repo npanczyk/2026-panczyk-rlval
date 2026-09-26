@@ -36,7 +36,7 @@ def descale(gym_value, type):
         type (string): Options: "power" or "dpower" or "dtheta"
 
     Returns:
-        float: value scaled for the gym system
+        float: value in physical system units
     """
     if type == "power":
         # real bounds are 0 to 22 MW, gym bounds are 0 to 1
