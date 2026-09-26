@@ -140,3 +140,17 @@ def episode_length_within_max_time(profile, episode_length, dt):
         return False
     else:
         return True
+
+def check_spec(history):
+    """Checks if a rollout's power trajectory stays within 3% (relative) of desired power.
+
+    Args:
+        history (pd.DataFrame): rollout history with 'actual_power' and 'desired_power' columns
+
+    Returns:
+        bool: True if actual power never deviates >=3% (relative) from desired power
+    """
+    pct_dev = np.abs(
+        (history["actual_power"] - history["desired_power"]) / history["desired_power"]
+    )
+    return (pct_dev < 0.03).all()

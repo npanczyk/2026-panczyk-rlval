@@ -253,7 +253,7 @@ class HolosMulti(gym.Env):
 
         return reward, terminated
 
-    def render(self):
+    def render(self, save=True):
         """Converts the history list of lists into a dataframe."""
         run_history = np.array(self.history)
         column_names = [
@@ -286,6 +286,8 @@ class HolosMulti(gym.Env):
 
         timestr = time.strftime("%Y%m%d-%H%M%S")
         save_path = self.save_dir / f"run_history_{timestr}.csv"
-        df.to_csv(save_path, index=False)
+         
+        if save:
+            df.to_csv(save_path, index=False)
 
         return df

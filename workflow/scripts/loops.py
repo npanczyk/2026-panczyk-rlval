@@ -26,6 +26,7 @@ from stable_baselines3.common.monitor import Monitor
 from accessories import find_latest_file, metrics
 from env import Undisturbed, make_undisturbed_env
 from functools import partial
+from accessories import check_spec
 
 
 def train_rl(env_type, save_dir, env_kwargs, total_timesteps=int(2e6), n_envs=10):
@@ -95,7 +96,7 @@ def train_rl(env_type, save_dir, env_kwargs, total_timesteps=int(2e6), n_envs=10
     return
 
 
-def rollout(model: sb3.PPO, env, disturbance_distribution):
+def rollout(model: sb3.PPO, env, disturbance_distribution, save_histories=True):
     """Run one deterministic rollout of `model` on `env` to termination.
 
     Standard gym inference loop: reset, then step with the model's
@@ -109,6 +110,7 @@ def rollout(model: sb3.PPO, env, disturbance_distribution):
         model: Trained SB3 model with a `.predict()` method.
         env: Gym environment instance (not vectorized).
         disturbance_distribution (DisturbanceDistribution object from fuzzing.py): holds disturbance distributions for observations, actions, and states
+        save_histories (bool, optional): decides whether to save histories from render as a csv. Defaults to True.
     """
     # get disturbance (noise) for the first observation
     xo0 = disturbance_distribution.Do.sample()
@@ -123,7 +125,12 @@ def rollout(model: sb3.PPO, env, disturbance_distribution):
             disturbance = x
         )
         done = terminated or truncated
-    env.render()
+
+    if save_histories:
+        return env.render()
+    else:
+        return env.render(save=False)
+    
 
 
 def test_trained_rl(env_type, load_dir, save_dir, env_kwargs, disturbance_distribution):
@@ -161,3 +168,24 @@ def test_trained_rl(env_type, load_dir, save_dir, env_kwargs, disturbance_distri
         f"Mean Control Effort: {mean_control_effort}"
     )
     return history
+
+def run_rollouts(rollout_fn, m, psi=check_spec):
+    """Runs m rollouts, save the trajectories and check spec compliance.
+
+    Args:
+        rollout_fn (callable): no-arg function that runs one rollout and returns its history (pd.DataFrame)
+        m (int): number of rollouts
+        psi (callable): spec-check function taking a history DataFrame, returns bool
+
+    Returns:
+        histories (list[pd.DataFrame]), results (np.ndarray[bool]): trajectories and pass/fail per rollout
+    """
+    histories = []
+    results = np.zeros(m, dtype=bool)
+
+    for i in range(m):
+        history = rollout_fn()
+        histories.append(history)
+        results[i] = psi(history)
+
+    return histories, results
