@@ -7,6 +7,7 @@ import numpy as np
 import viz
 import loops
 import fuzzing
+from accessories import check_spec
 
 
 def run_demo():
@@ -41,20 +42,65 @@ def run(test_profile="train", train_name="train_fivemillion", test_name=None):
     )
     # if no test name is set up, default it to whatever the test profile is
     if test_name is None:
-        test_name = test_profile + "_test"
+        test_name = test_profile + "_fuzzed_test"
     test_folder = run_folder / test_name
-    print(test_folder)
+
+    # set up disturbance distribution for the test
+    disturbance_dist = fuzzing.DisturbanceDistribution(
+                        Do=fuzzing.Do(sigma_p=0.05, sigma_dp=0.05, sigma_drum=0.05),
+                        Da=fuzzing.Da(sigma_dtheta=0),
+                        Ds=fuzzing.Ds(),
+                    )
     history = loops.test_trained_rl(
-        env_type=env.HolosMulti, load_dir=run_folder, save_dir=test_folder, env_kwargs=testing_kwargs
+        env_type=env.HolosMulti, load_dir=run_folder, save_dir=test_folder, env_kwargs=testing_kwargs, disturbance_distribution=disturbance_dist
     )
     viz.plot_power(history, save_dir=test_folder)
-    return
+    return history
 
+def run_rollouts(test_profile, train_name, m, psi=check_spec):
+    """Runs m rollouts, save the trajectories and check spec compliance.
 
+    Args:
+        rollout_fn (callable): no-arg function that runs one rollout and returns its history (pd.DataFrame)
+        m (int): number of rollouts
+        psi (callable): spec-check function taking a history DataFrame, returns bool
+
+    Returns:
+        histories (list[pd.DataFrame]), results (np.ndarray[bool]): trajectories and pass/fail per rollout
+    """
+    training_kwargs, testing_kwargs = profiles.get_profile(test_profile)
+    run_folder = profiles.multi_drum_training(
+        training_kwargs=training_kwargs, total_timesteps=int(5e6), n_envs=10, run_name=train_name
+    )
+    # if no test name is set up, default it to whatever the test profile is
+    test_name = test_profile + "_fuzzed_test"
+    test_folder = run_folder / test_name
+
+    # set up disturbance distribution for the test
+    disturbance_dist = fuzzing.DisturbanceDistribution(
+                        Do=fuzzing.Do(sigma_p=0.005, sigma_dp=0.005, sigma_drum=0.005),
+                        Da=fuzzing.Da(sigma_dtheta=0),
+                        Ds=fuzzing.Ds(),
+                    )
+    
+    histories = []
+    results = np.zeros(m, dtype=bool)
+
+    for i in range(m):
+        history = loops.test_trained_rl(
+        env_type=env.HolosMulti, load_dir=run_folder, save_dir=test_folder, env_kwargs=testing_kwargs, disturbance_distribution=disturbance_dist
+    )
+        histories.append(history)
+        results[i] = psi(history)
+
+    viz.plot_rollouts(histories, results, save_dir=test_folder)
+
+    return histories, results
 
 if __name__ == "__main__":
-    # run(
-    #     test_profile="long",
-    #     train_name="train_fivemillion",
-    # )
-    run_demo()
+    run_rollouts(
+        test_profile="test",
+        train_name="train_fivemillion",
+        m=10,
+    )
+    # run_demo()

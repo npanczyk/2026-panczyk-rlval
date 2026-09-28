@@ -136,15 +136,15 @@ class HolosMulti(gym.Env):
         self._plast = self.history[-1][1]  # last appended row, second column
         return (self._p - self._plast) / self.dt
 
-    def _log_history(self, init=False):
+    def _log_history(self, observation, init=False):
         if init:
             self.history = [
                 [
                     self.time,
-                    self._p,  # actual power
+                    observation["p"].item(),  # observed power
                     self.profile(self.time),  # desired power
                     *self._drum_angles,
-                    *self.state,
+                    *self.state, # includes actual power
                 ]
             ]
             return
@@ -152,10 +152,10 @@ class HolosMulti(gym.Env):
             self.history.append(
                 [
                     self.time,
-                    self._p,  # actual power
+                    observation["p"].item(),  # observed power
                     self.profile(self.time),  # desired power
                     *self._drum_angles,
-                    *self.state,
+                    *self.state, # actual power is in here
                 ]
             )
             return
@@ -188,7 +188,7 @@ class HolosMulti(gym.Env):
         # we have to do this to make it compatible with gym's reqs for reset()
         xo = options["xo"] if options and "xo" in options else {"dp": 0, "p": 0, "drum_angles": np.zeros(8)}
         observation = self._get_observation(xo=xo)
-        self._log_history(init=True)
+        self._log_history(observation=observation, init=True)
         return observation, {}  # return empty dict for info
 
     def step(self, action, disturbance):
@@ -217,7 +217,7 @@ class HolosMulti(gym.Env):
         # get the observation
         observation = self._get_observation(xo=disturbance.xo)
         # log the step in history
-        self._log_history(init=False)
+        self._log_history(observation=observation, init=False)
 
         # calculate the reward and termination criteria
         reward, terminated = self.calc_reward(

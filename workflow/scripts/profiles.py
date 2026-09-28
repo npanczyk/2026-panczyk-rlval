@@ -33,7 +33,7 @@ def get_profile(name=None, max_failed_drums=0):
         tuple: training_kwargs dictionary, testing_kwargs dictionary
     """
     # warn users if the profile name they provided is wrong
-    if name not in ["long", "low_power", "train"]:
+    if name not in ["long", "low_power", "train", "test"]:
         print(f'WARNING!!! {name} is not a recognized profile, defaulting to TRAIN profile.')
 
     # create interpolated power profiles
@@ -77,6 +77,9 @@ def get_profile(name=None, max_failed_drums=0):
     elif name == "train":
         test_profile = training_profile
         episode_length = 200
+    elif name == "test":
+            test_profile = testing_profile
+            episode_length = 200
     else:
         test_profile = testing_profile
         episode_length = 200
