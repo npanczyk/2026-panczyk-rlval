@@ -116,7 +116,7 @@ class HolosMulti(gym.Env):
 
         Returns: dp, p, drum angles, pnext as a dictionary
 
-        MUST CALL THIS FUNCTION BEFORE _log_history or indexing will be off!
+        MUST CALL THIS FUNCTION BEFORE setting _last_observation or indexing will be off!
         """
         if xo["drum_angles"].shape != (8,):
             raise ValueError("Drum angle disturbance must be in the shape (8,)!")
@@ -129,7 +129,8 @@ class HolosMulti(gym.Env):
             # always assume a steady state start
             self._dp = 0
         else: 
-            self._plast = self.history[-1][1] # this is the noisy power from the last timestep
+            self._plast = self._last_observation["p"].item() # this is the noisy power from the last timestep
+            # self._plast = self.history[-1][1] # this is the noisy power from the last timestep
             # get the "observed power rate" using two noisy power readings
             self._dp = (noisy_power - self._plast) / self.dt
         # return everything in a dictionary
@@ -192,6 +193,7 @@ class HolosMulti(gym.Env):
         xo = options["xo"] if options and "xo" in options else {"dp": 0, "p": 0, "drum_angles": np.zeros(8)}
         observation = self._get_observation(xo=xo, reset=True)
         self._log_history(observation=observation, init=True)
+        self._last_observation = observation
         return observation, {}  # return empty dict for info
 
     def step(self, action, disturbance):
@@ -219,6 +221,7 @@ class HolosMulti(gym.Env):
         observation = self._get_observation(xo=disturbance.xo)
         # log the step in history
         self._log_history(observation=observation, init=False)
+        self._last_observation = observation
 
         # calculate the reward and termination criteria
         reward, terminated = self.calc_reward(
@@ -253,6 +256,42 @@ class HolosMulti(gym.Env):
             terminated = True
 
         return reward, terminated
+
+    def get_snapshot(self):
+        """Gets a snapshot of the rollout at a certain step for MCTS
+
+        Returns:
+            dict: critical state values
+        """
+        return {
+        "time": self.time,
+        "state": self.state.copy(),
+        "_p": self._p,
+        "_pnext": self._pnext,
+        "_dp": self._dp,
+        "_drum_angles": self._drum_angles.copy(),
+        "masks": self.masks.copy(),
+        "observation": {k: v.copy() for k, v in self._last_observation.items()},
+        "last_history_row": list(self.history[-1]),
+    }
+
+    def set_snapshot(self, snap):
+        """Sets environment to snapshot state
+
+        Args:
+            snap (dict): snapshot dictionary from get_snapshot
+        """
+        self.time = snap["time"]
+        self.state = snap["state"].copy()
+        self._p = snap["_p"]
+        self._pnext = snap["_pnext"]
+        self._dp = snap["_dp"]
+        self._drum_angles = snap["_drum_angles"].copy()
+        self.masks = snap["masks"].copy()
+        self.history = [list(snap["last_history_row"])]
+        self._last_observation = {k: v.copy() for k, v in snap["observation"].items()}
+        # re-generate the observation dict here to prevent future corruptions from modifying an attribute
+        return {k: v.copy() for k, v in snap["observation"].items()}
 
     def render(self, save=True):
         """Converts the history list of lists into a dataframe."""

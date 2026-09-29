@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 from pathlib import Path
 import os
-
+import stable_baselines3 as sb3
 
 def scale(real_value, type):
     """Takes a value in real space and converts it to gym space
@@ -154,3 +154,22 @@ def check_spec(history):
         (history["actual_power"] - history["desired_power"]) / history["desired_power"]
     )
     return (pct_dev < 0.03).all()
+
+def percent_diff(ptrue, pdesired):
+    return abs(ptrue - pdesired)/pdesired
+
+def load_trained_model(load_dir="train_fivemillion"):
+    """Loads a trained model
+
+    Args:
+        load_dir (str): Name of folder where models dir is 
+
+    Returns:
+        sb3 model
+    """
+    model_folder = "runs" / Path(load_dir) / "models/"
+    model_path = find_latest_file(model_folder, pattern="*.zip")
+    model = sb3.PPO.load(model_path, device="cpu")
+    return model
+
+# check an operational spec on the drums!!

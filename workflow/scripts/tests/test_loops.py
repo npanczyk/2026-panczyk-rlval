@@ -15,6 +15,7 @@ import env
 from scipy.interpolate import interp1d
 from functools import partial
 from env import make_undisturbed_env
+import profiles
 
 
 # ---------------------------------------------------------------------------
@@ -172,10 +173,10 @@ def test_rollout_applies_observation_noise(tmp_path):
     )
 
     seen = []
-    real_get_observation = partial(test_env._get_observation, reset=False)
-    def spy(xo):
-        obs = real_get_observation(xo)
-        seen.append((obs["p"][0], test_env._p))  # (observed, true) at this instant
+    real_get_observation = test_env._get_observation
+    def spy(xo, reset=False):
+        obs = real_get_observation(xo, reset=reset)
+        seen.append((obs["p"][0], test_env._p))
         return obs
     test_env._get_observation = spy
 
@@ -195,33 +196,111 @@ def test_test_trained_rl_orchestrates_load_run_and_metrics(tmp_path, env_kwargs)
     fake_history = pd.DataFrame({"time": [0, 1], "actual_power": [1.0, 1.0]})
     mock_disturbance_dist = MagicMock()
 
-    with patch("loops.find_latest_file") as mock_find_latest, patch(
-        "loops.sb3.PPO.load"
-    ) as mock_ppo_load, patch("loops.rollout") as mock_control_loop, patch(
-        "loops.metrics", return_value=(0.1, 0.2, 0.3, 0.4)
-    ) as mock_calc_metrics, patch(
-        "loops.pd.read_csv", return_value=fake_history
-    ) as mock_read_csv:
+    with patch("loops.load_trained_model") as mock_load_model, \
+         patch("loops.find_latest_file") as mock_find_latest, \
+         patch("loops.rollout") as mock_control_loop, \
+         patch("loops.metrics", return_value=(0.1, 0.2, 0.3, 0.4)) as mock_calc_metrics, \
+         patch("loops.pd.read_csv", return_value=fake_history) as mock_read_csv:
 
-        mock_find_latest.side_effect = [
-            tmp_path / "models" / "best_model.zip",
-            tmp_path / "run_history_001.csv",
-        ]
         mock_model = MagicMock()
-        mock_ppo_load.return_value = mock_model
+        mock_load_model.return_value = mock_model
+        mock_find_latest.return_value = tmp_path / "run_history_001.csv"
 
         result = loops.test_trained_rl(
             DummyDictEnv, load_dir, save_dir, env_kwargs, mock_disturbance_dist, save_histories=True
         )
 
-        mock_find_latest.assert_has_calls([
-            call(tmp_path / "models", pattern="*.zip"),
-            call(tmp_path, pattern="run_history*.csv"),
-        ])
-        mock_ppo_load.assert_called_once_with(
-            tmp_path / "models" / "best_model.zip", device="cpu"
+        mock_load_model.assert_called_once_with(load_dir)
+        mock_control_loop.assert_called_once_with(
+            mock_model, ANY, mock_disturbance_dist, save_histories=True
         )
-        mock_control_loop.assert_called_once_with(mock_model, ANY, mock_disturbance_dist)
+        mock_find_latest.assert_called_once_with(tmp_path, pattern="run_history*.csv")
         mock_read_csv.assert_called_once_with(tmp_path / "run_history_001.csv")
         mock_calc_metrics.assert_called_once_with(fake_history)
         assert result is fake_history
+
+# ---------------------------------------------------------------------------
+# test_rollout_from_snapshot
+# ---------------------------------------------------------------------------
+
+class StubPolicy:
+    """Deterministic policy that depends on the observation (so a wrong restored obs changes the result)."""
+
+    def predict(self, obs, deterministic=True):
+        err = float(obs["pnext"][0] - obs["p"][0]) - 2.0 * float(obs["dp"][0])
+        return np.full(8, np.clip(5 * err, -1, 1), dtype=np.float32), None
+
+
+def full_run_max_dev(env, model, dist):
+    """Reference: plain reset-to-end rollout, deviation from env.history like check_spec does."""
+    obs, _ = env.reset()
+    np.random.seed(0)
+    done = False
+    while not done:
+        action, _ = model.predict(obs, deterministic=True)
+        x = dist.sample(env.state, action)
+        obs, _, term, trunc, _ = env.step(action, x)
+        done = term or trunc
+    df = env.render(save=False)
+    max_dev = float(np.abs((df["actual_power"] - df["desired_power"]) / df["desired_power"]).max())
+    return max_dev, env.state.copy()
+
+
+def check_rollout_from_snapshot(env, model, dist, mid_step=30):
+    profile = env.profile
+    expected, final_state = full_run_max_dev(env, model, dist)
+
+    # 1) root snapshot reproduces a plain full rollout
+    env.reset()
+    snap0 = env.get_snapshot()
+    np.random.seed(0)
+    md, n = loops.rollout_from_snapshot(env, model, snap0, dist, 0)
+    assert md == pytest.approx(expected, rel=1e-6)
+    assert n == env.runtime  # one simulator step per second, dt=1
+    assert np.allclose(env.state, final_state)  # final state is sensitive to every action taken
+
+    # 2) a mid-trajectory snapshot plus start_max reproduces the same result
+    obs, _ = env.reset()
+    np.random.seed(0)
+    mid_max = 0.0
+    for _ in range(mid_step):
+        action, _ = model.predict(obs, deterministic=True)
+        obs, *_ = env.step(action, dist.sample(env.state, action))
+        print(f"PROFILE: {profile(env.time)}")
+        mid_max = max(mid_max, abs(env._p - profile(env.time)) / profile(env.time))
+    snap_mid = env.get_snapshot()
+    rng = np.random.get_state()
+    obs_back = env.set_snapshot(snap_mid)  # restore should hand back the obs saved with the snapshot
+    for k in obs:
+        assert np.array_equal(obs_back[k], obs[k]), k
+
+    np.random.set_state(rng)
+    md_mid, n_mid = loops.rollout_from_snapshot(env, model, snap_mid, dist, mid_max)
+    assert md_mid == pytest.approx(expected, rel=1e-6)
+    assert n_mid == env.runtime - mid_step
+    assert np.allclose(env.state, final_state)
+
+    # 3) determinism: same snapshot + same RNG state gives an identical result, and the snapshot is not corrupted
+    np.random.set_state(rng)
+    md_again, _ = loops.rollout_from_snapshot(env, model, snap_mid, dist, mid_max)
+    assert md_again == md_mid
+
+    # 4) a snapshot at the end of the episode does nothing
+    md_end, n_end = loops.rollout_from_snapshot(env, model, env.get_snapshot(), dist, 0.123)
+    assert (md_end, n_end) == (0.123, 0)
+
+
+def test_rollout_from_snapshot_stub(tmp_path):
+    profile = interp1d([0, 10, 70, 100, 115, 125, 150, 180, 200],
+                       [1, 1, 0.5, 0.5, 0.65, 0.65, 0.5, 0.8, 0.8])
+    holosenv = env.HolosMulti(profile=profile, episode_length=200, training=False,
+                     max_failed_drums=0, save_dir=tmp_path)
+    dist = fuzzing.DisturbanceDistribution(fuzzing.Do(0.001, 0.005), fuzzing.Da(0), fuzzing.Ds())
+    check_rollout_from_snapshot(holosenv, StubPolicy(), dist)
+
+
+def test_rollout_from_snapshot_trained(tmp_path):
+    _, env_kwargs = profiles.get_profile("test", max_failed_drums=0)
+    holosenv = env.HolosMulti(**env_kwargs, save_dir=tmp_path)
+    dist = fuzzing.DisturbanceDistribution(fuzzing.Do(0.001, 0.005), fuzzing.Da(0), fuzzing.Ds())
+    check_rollout_from_snapshot(holosenv, accessories.load_trained_model(), dist)

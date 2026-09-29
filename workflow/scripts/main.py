@@ -50,7 +50,7 @@ def run_rollouts(test_profile, train_name, m, psi=check_spec):
 
     # set up disturbance distribution for the test
     disturbance_dist = fuzzing.DisturbanceDistribution(
-                        Do=fuzzing.Do(sigma_p=0.005, sigma_drum=0.005),
+                        Do=fuzzing.Do(sigma_p=0.01, sigma_drum=0.005),
                         Da=fuzzing.Da(sigma_dtheta=0),
                         Ds=fuzzing.Ds(),
                     )
@@ -70,10 +70,11 @@ def run_rollouts(test_profile, train_name, m, psi=check_spec):
 
     return histories, results
 
+
 if __name__ == "__main__":
     run_rollouts(
         test_profile="test",
         train_name="train_fivemillion",
-        m=3,
+        m=5,
     )
     # run_demo()
