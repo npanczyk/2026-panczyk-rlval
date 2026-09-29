@@ -78,7 +78,7 @@ def run_rollouts(test_profile, train_name, m, psi=check_spec):
 
     # set up disturbance distribution for the test
     disturbance_dist = fuzzing.DisturbanceDistribution(
-                        Do=fuzzing.Do(sigma_p=0.005, sigma_dp=0.005, sigma_drum=0.005),
+                        Do=fuzzing.Do(sigma_p=0.005, sigma_drum=0.005),
                         Da=fuzzing.Da(sigma_dtheta=0),
                         Ds=fuzzing.Ds(),
                     )
@@ -88,7 +88,7 @@ def run_rollouts(test_profile, train_name, m, psi=check_spec):
 
     for i in range(m):
         history = loops.test_trained_rl(
-        env_type=env.HolosMulti, load_dir=run_folder, save_dir=test_folder, env_kwargs=testing_kwargs, disturbance_distribution=disturbance_dist
+        env_type=env.HolosMulti, load_dir=run_folder, save_dir=test_folder, env_kwargs=testing_kwargs, disturbance_distribution=disturbance_dist, save_histories=False
     )
         histories.append(history)
         results[i] = psi(history)
@@ -101,6 +101,6 @@ if __name__ == "__main__":
     run_rollouts(
         test_profile="test",
         train_name="train_fivemillion",
-        m=10,
+        m=50,
     )
     # run_demo()

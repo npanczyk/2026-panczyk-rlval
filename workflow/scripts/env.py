@@ -108,33 +108,37 @@ class HolosMulti(gym.Env):
 
         self.action_space = gym.spaces.Box(low=-1, high=1, shape=(8,), dtype=np.float32)
 
-    def _get_observation(self, xo):
+    def _get_observation(self, xo, reset=False):
         """Converts internal state to observation format (recommended per gym docs)
 
         Args:
             xo (dict, optional): observation disturbance with keys dp, p, and drum_angles
 
         Returns: dp, p, drum angles, pnext as a dictionary
+
+        MUST CALL THIS FUNCTION BEFORE _log_history or indexing will be off!
         """
         if xo["drum_angles"].shape != (8,):
             raise ValueError("Drum angle disturbance must be in the shape (8,)!")
         # fuzz then scale the drum angles, noise should be in physical space
         noisy_drum_angles = scale(self._drum_angles + xo["drum_angles"], "drum_angles")
+        # fuzz the current power
+        noisy_power = self._p + xo["p"]
+
+        if reset:
+            # always assume a steady state start
+            self._dp = 0
+        else: 
+            self._plast = self.history[-1][1] # this is the noisy power from the last timestep
+            # get the "observed power rate" using two noisy power readings
+            self._dp = (noisy_power - self._plast) / self.dt
+        # return everything in a dictionary
         return {
-            "dp": np.array([self._dp + xo["dp"]], dtype=np.float32),
-            "p": np.array([self._p + xo["p"]], dtype=np.float32),
+            "dp": np.array([self._dp], dtype=np.float32),
+            "p": np.array([noisy_power], dtype=np.float32),
             "pnext": np.array([self._pnext], dtype=np.float32),
             "drum_angles": noisy_drum_angles.astype(np.float32),
         }
-
-    def _get_dp(self):
-        """Compute finite difference change in power. Must call this function BEFORE calling _log_history or the indexing will be off!
-
-        Returns:
-            float: change in power, dp/dt
-        """
-        self._plast = self.history[-1][1]  # last appended row, second column
-        return (self._p - self._plast) / self.dt
 
     def _log_history(self, observation, init=False):
         if init:
@@ -172,7 +176,6 @@ class HolosMulti(gym.Env):
         super().reset(seed=seed)
         # reset starting states
         self.time = 0
-        self._dp = 0  # steady state start
         self._pnext = self.profile(
             0 + self.dt
         )  # desired power from profile at first time step
@@ -187,7 +190,7 @@ class HolosMulti(gym.Env):
         # get observation disturbance for the first step via options
         # we have to do this to make it compatible with gym's reqs for reset()
         xo = options["xo"] if options and "xo" in options else {"dp": 0, "p": 0, "drum_angles": np.zeros(8)}
-        observation = self._get_observation(xo=xo)
+        observation = self._get_observation(xo=xo, reset=True)
         self._log_history(observation=observation, init=True)
         return observation, {}  # return empty dict for info
 
@@ -205,8 +208,6 @@ class HolosMulti(gym.Env):
         self.state = sol.y[:, -1] + disturbance.xs
         # update the power level according to new neutron density from PKE
         self._p, *_ = self.state
-        # get the change in power from the previous state
-        self._dp = self._get_dp()
         # get the next desired power from the profile
         self._pnext = self.profile(self.time + self.dt)
         # update the drum angles

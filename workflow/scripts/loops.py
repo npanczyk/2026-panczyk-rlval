@@ -96,7 +96,7 @@ def train_rl(env_type, save_dir, env_kwargs, total_timesteps=int(2e6), n_envs=10
     return
 
 
-def rollout(model: sb3.PPO, env, disturbance_distribution, save_histories=True):
+def rollout(model: sb3.PPO, env, disturbance_distribution, save_histories=False):
     """Run one deterministic rollout of `model` on `env` to termination.
 
     Standard gym inference loop: reset, then step with the model's
@@ -133,7 +133,7 @@ def rollout(model: sb3.PPO, env, disturbance_distribution, save_histories=True):
     
 
 
-def test_trained_rl(env_type, load_dir, save_dir, env_kwargs, disturbance_distribution):
+def test_trained_rl(env_type, load_dir, save_dir, env_kwargs, disturbance_distribution, save_histories=False):
     """Evaluate the most recent trained checkpoint and report control metrics.
 
     Loads the newest .zip checkpoint in `save_dir/models/`, runs it
@@ -146,6 +146,7 @@ def test_trained_rl(env_type, load_dir, save_dir, env_kwargs, disturbance_distri
         save_dir: Path to save the file to a
         env_kwargs: Kwargs passed to `env_type`
         disturbance_distribution (DisturbanceDistribution object from fuzzing.py): holds disturbance distributions for observations, actions, and states
+        save_histories: whether or not to save the history csv
 
 
     Returns:
@@ -157,16 +158,17 @@ def test_trained_rl(env_type, load_dir, save_dir, env_kwargs, disturbance_distri
     model = sb3.PPO.load(model_path, device="cpu")
 
     test_env = env_type(**env_kwargs, save_dir=save_dir)
-    rollout(model, test_env, disturbance_distribution)
+    history = rollout(model, test_env, disturbance_distribution, save_histories=save_histories)
 
-    history_path = find_latest_file(save_dir, pattern="run_history*.csv")
-    history = pd.read_csv(history_path)
-    mae, cae, control_effort, mean_control_effort = metrics(history)
-    print(
-        f"{save_dir.name} - MAE: {mae}, CAE: {cae}, "
-        f"Control Effort: {control_effort}, "
-        f"Mean Control Effort: {mean_control_effort}"
-    )
+    if save_histories:
+        history_path = find_latest_file(save_dir, pattern="run_history*.csv")
+        history = pd.read_csv(history_path)
+        mae, cae, control_effort, mean_control_effort = metrics(history)
+        print(
+            f"{save_dir.name} - MAE: {mae}, CAE: {cae}, "
+            f"Control Effort: {control_effort}, "
+            f"Mean Control Effort: {mean_control_effort}"
+        )
     return history
 
 def run_rollouts(rollout_fn, m, psi=check_spec):
