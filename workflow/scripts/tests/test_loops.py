@@ -166,13 +166,13 @@ def test_rollout_applies_observation_noise(tmp_path):
     mock_model.predict.return_value = (np.zeros(8), None)
 
     disturbance_dist = fuzzing.DisturbanceDistribution(
-        Do=fuzzing.Do(sigma_p=0.05, sigma_dp=0.05, sigma_drum=0.05),
+        Do=fuzzing.Do(sigma_p=0.05, sigma_drum=0.05),
         Da=fuzzing.Da(sigma_dtheta=0),
         Ds=fuzzing.Ds(),
     )
 
     seen = []
-    real_get_observation = test_env._get_observation
+    real_get_observation = partial(test_env._get_observation, reset=False)
     def spy(xo):
         obs = real_get_observation(xo)
         seen.append((obs["p"][0], test_env._p))  # (observed, true) at this instant
@@ -211,7 +211,7 @@ def test_test_trained_rl_orchestrates_load_run_and_metrics(tmp_path, env_kwargs)
         mock_ppo_load.return_value = mock_model
 
         result = loops.test_trained_rl(
-            DummyDictEnv, load_dir, save_dir, env_kwargs, mock_disturbance_dist
+            DummyDictEnv, load_dir, save_dir, env_kwargs, mock_disturbance_dist, save_histories=True
         )
 
         mock_find_latest.assert_has_calls([

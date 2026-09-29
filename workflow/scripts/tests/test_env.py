@@ -17,10 +17,21 @@ def env():
 @pytest.fixture
 def zero_disturbance():
     return Disturbance(
-        xo={"dp": 0, "p": 0, "drum_angles": np.zeros(8)},
+        xo={"p": 0, "drum_angles": np.zeros(8)},
         xa=np.zeros(8),
         xs=np.zeros(12),
     )
+
+@pytest.fixture
+def observation():
+    drum_angles = np.array([77.8 / 180] * 8)
+    observation = {
+            "dp": np.array([0], dtype=np.float32),
+            "p": np.array([1], dtype=np.float32),
+            "pnext": np.array([1], dtype=np.float32),
+            "drum_angles": drum_angles.astype(np.float32),
+        }
+    return observation
 
 def test_init_observation_space_keys(env):
     assert set(env.observation_space.spaces.keys()) == {
@@ -88,24 +99,12 @@ def test_reset_history(env):
     assert len(row) == 1 + 1 + 1 + 8 + 12
 
 
-def test_log_history(env):
+def test_log_history(env, observation):
     env.reset()
     # this should initialize the history
-    env._log_history()
+    env._log_history(observation=observation)
     # this should append another row
     assert len(env.history) == 2
-
-
-def test_get_dp_zero_when_power_unchanged(env):
-    env.reset()
-    env._p = env.history[-1][1]  # same as last logged power
-    assert env._get_dp() == 0
-
-
-def test_get_dp_nonzero_when_power_changes(env):
-    env.reset()
-    env._p = env.history[-1][1] + 0.5  # fudge to mimic ramp
-    assert env._get_dp() == pytest.approx(0.5 / env.dt)
 
 
 def test_render(env):

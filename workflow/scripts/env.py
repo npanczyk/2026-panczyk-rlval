@@ -285,6 +285,7 @@ class HolosMulti(gym.Env):
         df = pd.DataFrame(run_history, columns=column_names)
         df["diff"] = (df["actual_power"] - df["desired_power"]) * 100
 
+        # this will likely cause overwrites with many rollouts that happen in less than 1 second
         timestr = time.strftime("%Y%m%d-%H%M%S")
         save_path = self.save_dir / f"run_history_{timestr}.csv"
          

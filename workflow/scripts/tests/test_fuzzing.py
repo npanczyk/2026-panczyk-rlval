@@ -11,7 +11,7 @@ from fuzzing import Disturbance, DisturbanceDistribution, Do, Da, Ds
 
 
 def test_disturbance_stores_fields():
-    # just checking the disturbance class structure with dummy values
+    # check the disturbance class structure with dummy values
     d = Disturbance(xo={"p": 1}, xa=np.ones(8), xs=np.zeros(12))
     assert d.xo == {"p": 1}
     np.testing.assert_array_equal(d.xa, np.ones(8))
@@ -21,17 +21,15 @@ def test_disturbance_stores_fields():
 # --- Do ---
 
 def test_do_sample_keys_and_shapes():
-    xo = Do(sigma_p=0.01, sigma_dp=0.01, sigma_drum=0.01).sample()
-    assert set(xo.keys()) == {"p", "dp", "drum_angles"}
+    xo = Do(sigma_p=0.01, sigma_drum=0.01).sample()
+    assert set(xo.keys()) == {"p", "drum_angles"}
     assert np.shape(xo["drum_angles"]) == (8,)
     assert np.isscalar(xo["p"]) or np.shape(xo["p"]) == ()
-    assert np.isscalar(xo["dp"]) or np.shape(xo["dp"]) == ()
 
 
 def test_do_sample_zero_sigma_is_exactly_zero():
-    xo = Do(sigma_p=0, sigma_dp=0, sigma_drum=0).sample()
+    xo = Do(sigma_p=0,  sigma_drum=0).sample()
     assert xo["p"] == 0
-    assert xo["dp"] == 0
     np.testing.assert_array_equal(xo["drum_angles"], np.zeros(8))
 
 

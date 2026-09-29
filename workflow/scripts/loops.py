@@ -127,7 +127,7 @@ def rollout(model: sb3.PPO, env, disturbance_distribution, save_histories=False)
         done = terminated or truncated
 
     if save_histories:
-        return env.render()
+        return env.render(save=True)
     else:
         return env.render(save=False)
     

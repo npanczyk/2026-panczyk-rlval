@@ -51,7 +51,7 @@ def test_multi_drum_runthrough(quick_kwargs, tmp_path, monkeypatch):
     assert (run_folder / "models" / "best_model.zip").exists()
 
     disturbance_dist = fuzzing.DisturbanceDistribution(
-            Do=fuzzing.Do(sigma_p=0.05, sigma_dp=0.05, sigma_drum=0.05),
+            Do=fuzzing.Do(sigma_p=0.05, sigma_drum=0.05),
             Da=fuzzing.Da(sigma_dtheta=0),
             Ds=fuzzing.Ds(),
         )
