@@ -18,7 +18,7 @@ def robustness(p_actual, p_desired, p_threshold):
         p_desired (array): Desired power at corresponding times to p_actual
         p_threshold (float): power specification as a percent deviation from profile
     """
-    percent_diffs = abs(p_actual - p_desired)/p_desired
+    percent_diffs = abs(np.array(p_actual) - np.array(p_desired))/np.array(p_desired)
     rho = min(p_threshold - percent_diffs)
     return max(0, rho) # clip so that all failures get the same score, keeps the algorithm objective on most likely failures, not biggest failures
 
@@ -45,13 +45,25 @@ class MCTS:
         self.k_max = k_max # number of iterations
         self.env = env
         self.model = model
-        self.p_threshold = self.p_threshold # power deviation threshold percent diff, defaults to 3%
+        self.p_threshold = p_threshold # power deviation threshold percent diff, defaults to 3%
 
     def initialize_tree(self, starting_state):
         return [Node(
             state=starting_state,
             N=1
         )]
+
+    def select(self, tree):
+            """Method to select a node
+    
+            Args:
+                alg (MCTS object): MCTS algorithm parameters
+                tree (list): list of nodes in the tree
+            """
+            node = tree[0] # always start at the root
+            while len(node.children) > self.k*(node.N**self.alpha):
+                node = lcb(node, self.c)
+            return node
 
     def score(self, snapshot, x):
         """Scoring function to return Q for a node
@@ -73,14 +85,13 @@ class Node:
             state,
             parent = None,
             edge = None,
-            children = [],
             N = 0,
             Q = 0
     ):
         self.state = state
         self.parent = parent
         self.edge = edge
-        self.children = children
+        self.children = []
         self.N = N
         self.Q = Q
 
@@ -105,23 +116,14 @@ class Node:
         else:
             return False
 
-    def select(self, alg, tree):
-        """Method to select a node
-
-        Args:
-            alg (MCTS object): MCTS algorithm parameters
-            tree (list): list of nodes in the tree
-        """
-        c, k, alpha, node = alg.c, alg.k, alg.alpha, tree[0] # always start at the root
-        while len(node.children) > k*(node.N**alpha):
-            node = lcb(node, c)
-        return node
-
     def extend(self, alg, tree):
+        # reset the environment to the node's state
+        alg.env.set_snapshot(self.state)
         # get edge info
-        x = alg.disturbance_dist.sample()
         last_observation = self.state["observation"]
         action, _states = alg.model.predict(last_observation, deterministic=True)
+        # sample a disturbance distribution using the environment's state and action we just predicted
+        x = alg.disturbance_dist.sample(alg.env.state, action)
         # now we actually create the node, by taking a step
         obs, _, terminated, truncated, _ = alg.env.step(
                     action=action,
@@ -168,9 +170,10 @@ if __name__ == "__main__":
         c=1, 
         k=1, 
         alpha=1, 
+        lam = 0.01,
         disturbance_dist=disturbance_dist, 
         k_max=10, 
-        environment=env.HolosMulti(**testing_kwargs), 
+        env=env.HolosMulti(**testing_kwargs), 
         model= load_trained_model(load_dir="train_fivemillion")
         )
     tree = alg.initialize_tree()
