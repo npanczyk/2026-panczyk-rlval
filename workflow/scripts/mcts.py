@@ -4,6 +4,7 @@ from accessories import load_trained_model
 import fuzzing
 import env
 import profiles
+from loops import rollout_from_snapshot
 
 """
 The algorithms in this script are based on Algorithm 5.10 in Algorithm's for Validation by Kochenderfer et al.
@@ -35,14 +36,16 @@ def lcb(node, c):
 
 
 class MCTS:
-    def __init__(self,  c, k, alpha, disturbance_dist, k_max, env, model):
+    def __init__(self,  c, k, alpha, lam, disturbance_dist, k_max, env, model, p_threshold=0.03):
         self.c = c # exploration constant
         self.k = k # progressive widening constant
         self.alpha = alpha # progressive widening exponent
+        self.lam = lam # how much weight to place on the likelihood of the disturbance versus the proximity to failure (captured by rho) for the scoring function
         self.disturbance_dist = disturbance_dist # sampling returns x, a disturbance object
         self.k_max = k_max # number of iterations
         self.env = env
         self.model = model
+        self.p_threshold = self.p_threshold # power deviation threshold percent diff, defaults to 3%
 
     def initialize_tree(self, starting_state):
         return [Node(
@@ -50,18 +53,19 @@ class MCTS:
             N=1
         )]
 
-    def score(self, rho, x, lam):
+    def score(self, snapshot, x):
         """Scoring function to return Q for a node
 
         Args:
-            rho (float): Robustness of a trajectory calculated via robustness()
+            snapshot (dict): Snapshot of environment state from env.get_snapshot()
             x (disturbance): Disturbance object
-            lam (likelihood weight): how much weight to place on the likelihood of the disturbance versus the proximity to failure (captured by rho)
 
         Returns:
             float: Q value for a node
         """
-        return rho - lam*self.disturbance_dist.logpdf(x)
+        p_actual, p_desired = rollout_from_snapshot(self.env, self.model, snapshot, self.disturbance_dist)
+        rho = robustness(p_actual, p_desired, self.p_threshold)
+        return rho - self.lam*self.disturbance_dist.logpdf(x)
 
 class Node:
     def __init__(
@@ -69,7 +73,7 @@ class Node:
             state,
             parent = None,
             edge = None,
-            children = None,
+            children = [],
             N = 0,
             Q = 0
     ):
@@ -113,12 +117,41 @@ class Node:
             node = lcb(node, c)
         return node
 
-    def extend(self, ):
+    def extend(self, alg, tree):
+        # get edge info
+        x = alg.disturbance_dist.sample()
+        last_observation = self.state["observation"]
+        action, _states = alg.model.predict(last_observation, deterministic=True)
+        # now we actually create the node, by taking a step
+        obs, _, terminated, truncated, _ = alg.env.step(
+                    action=action,
+                    disturbance = x
+                )
+        snapshot = alg.env.get_snapshot()
+        # score the node
+        q = alg.score(
+            snapshot = snapshot,
+            x = x
+        )
+        child_node = Node(
+            state = snapshot,
+            parent = self,
+            edge = (last_observation, action, x),
+            N=1,
+            Q=q
+        )
+        self.children.append(child_node)
+        tree.append(child_node)
+
+        # now it's time to backpropagate!
+        # start at the parent node of the child we just created
+        node = self
+        # when we get to the root, node.parent = None and the loop ends
+        while node is not None:
+            node.N += 1
+            node.Q += (q - node.Q) / node.N # Q values must be positive or this will break
+            q, node = node.Q, node.parent
         return 
-
-
-    
-
 
 
 
@@ -140,4 +173,12 @@ if __name__ == "__main__":
         environment=env.HolosMulti(**testing_kwargs), 
         model= load_trained_model(load_dir="train_fivemillion")
         )
-    
+    tree = alg.initialize_tree()
+
+    for i in range(alg.k_max):
+        node = tree[0]
+        node.select()
+        node.expand()
+
+    print(tree)
+

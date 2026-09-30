@@ -182,25 +182,25 @@ def test_trained_rl(env_type, load_dir, save_dir, env_kwargs, disturbance_distri
 #             break
 #     return obs, np.array(states)
 
-def rollout_from_snapshot(env, model, snapshot, disturbance_distribution, max_existing_dev):
+def rollout_from_snapshot(env, model, snapshot, disturbance_distribution):
     """Runs a rollout of the model from a snapshot for MCTS.
 
     Args:
         env (holos multi environment): _description_
         model (sb3.PPO model object): loaded pre-trained model used on the entire rollout
         snapshot (dict): snapshot of the environment state 
-        disturbance_distribution (Disturbance object from fuzzing.py): _description_
-        max_existing_dev (_type_): _description_
+        disturbance_distribution (Disturbance object from fuzzing.py)
+    Returns:
+        tuple: actual power over rollout, desired power over rollout
+
     """
     observation = env.set_snapshot(snapshot)
-    max_dev = max_existing_dev
-    n_steps = 0
+    p_actual_list = []
+    p_desired_list = []
     while env.time < env.runtime:
         action, _ = model.predict(observation, deterministic=True)
         x = disturbance_distribution.sample(env.state, action)
         observation, _, terminated, truncated, _ = env.step(action, disturbance=x)
-        p_desired = float(env.profile(env.time))
-        max_dev = max(max_dev, percent_diff(env._p, p_desired))
-        n_steps += 1
-        done = terminated or truncated
-    return max_dev, n_steps
+        p_desired_list.append(float(env.profile(env.time)))
+        p_actual_list.append(env._p)
+    return p_actual_list, p_desired_list
