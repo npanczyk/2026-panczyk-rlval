@@ -1,6 +1,9 @@
 import numpy as np
 import pandas as pd
 from accessories import load_trained_model
+import fuzzing
+import env
+import profiles
 
 """
 The algorithms in this script are based on Algorithm 5.10 in Algorithm's for Validation by Kochenderfer et al.
@@ -15,7 +18,9 @@ def robustness(p_actual, p_desired, p_threshold):
         p_threshold (float): power specification as a percent deviation from profile
     """
     percent_diffs = abs(p_actual - p_desired)/p_desired
-    return min(percent_diffs)
+    rho = min(p_threshold - percent_diffs)
+    return max(0, rho) # clip so that all failures get the same score, keeps the algorithm objective on most likely failures, not biggest failures
+
 
 def lcb(node, c):
     Qs = [node.Q for node in node.children]
@@ -30,19 +35,33 @@ def lcb(node, c):
 
 
 class MCTS:
-    def __init__(self, scoring_func, c, k, alpha, disturbance_func, k_max):
-        self.scoring_func = scoring_func # scoring function to get Q for each node
+    def __init__(self,  c, k, alpha, disturbance_dist, k_max, env, model):
         self.c = c # exploration constant
         self.k = k # progressive widening constant
         self.alpha = alpha # progressive widening exponent
-        self.get_disturbance = disturbance_func # returns x, a disturbance object
+        self.disturbance_dist = disturbance_dist # sampling returns x, a disturbance object
         self.k_max = k_max # number of iterations
+        self.env = env
+        self.model = model
 
     def initialize_tree(self, starting_state):
         return [Node(
             state=starting_state,
             N=1
         )]
+
+    def score(self, rho, x, lam):
+        """Scoring function to return Q for a node
+
+        Args:
+            rho (float): Robustness of a trajectory calculated via robustness()
+            x (disturbance): Disturbance object
+            lam (likelihood weight): how much weight to place on the likelihood of the disturbance versus the proximity to failure (captured by rho)
+
+        Returns:
+            float: Q value for a node
+        """
+        return rho - lam*self.disturbance_dist.logpdf(x)
 
 class Node:
     def __init__(
@@ -94,7 +113,8 @@ class Node:
             node = lcb(node, c)
         return node
 
-    def extend(self, )
+    def extend(self, ):
+        return 
 
 
     
@@ -105,4 +125,19 @@ class Node:
 
 if __name__ == "__main__":
     model = load_trained_model(load_dir="train_fivemillion")
+    disturbance_dist = fuzzing.DisturbanceDistribution(
+                            Do=fuzzing.Do(sigma_p=0.01, sigma_drum=0.005),
+                            Da=fuzzing.Da(sigma_dtheta=0),
+                            Ds=fuzzing.Ds(),
+                        )
+    training_kwargs, testing_kwargs = profiles.get_profile(name="test", max_failed_drums=0)
+    alg = MCTS(
+        c=1, 
+        k=1, 
+        alpha=1, 
+        disturbance_dist=disturbance_dist, 
+        k_max=10, 
+        environment=env.HolosMulti(**testing_kwargs), 
+        model= load_trained_model(load_dir="train_fivemillion")
+        )
     
