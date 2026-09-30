@@ -265,6 +265,7 @@ class HolosMulti(gym.Env):
         """
         return {
         "time": self.time,
+        "runtime": self.runtime,
         "state": self.state.copy(),
         "_p": self._p,
         "_pnext": self._pnext,
