@@ -5,6 +5,7 @@ import fuzzing
 import env
 import profiles
 from loops import rollout_from_snapshot
+from viz import plot_tree, plot_tree_structure
 
 """
 The algorithms in this script are based on Algorithm 5.10 in Algorithm's for Validation by Kochenderfer et al.
@@ -18,9 +19,16 @@ def robustness(p_actual, p_desired, p_threshold):
         p_desired (array): Desired power at corresponding times to p_actual
         p_threshold (float): power specification as a percent deviation from profile
     """
+    # if we're at a terminal node, we won't get power arrays, so return infinity (we're going to take a min of this rho and the path rho, so path rho will always get picked if we're at a terminal node)
+    if type(p_actual) != list:
+        p_actual = np.array([p_actual])
+    if type(p_desired) != list:
+        p_desired = np.array([p_desired])
+    if len(p_actual) == 0:
+        return np.inf
     percent_diffs = abs(np.array(p_actual) - np.array(p_desired))/np.array(p_desired)
     rho = min(p_threshold - percent_diffs)
-    return max(0, rho) # clip so that all failures get the same score, keeps the algorithm objective on most likely failures, not biggest failures
+    return rho
 
 
 def lcb(node, c):
@@ -47,9 +55,12 @@ class MCTS:
         self.model = model
         self.p_threshold = p_threshold # power deviation threshold percent diff, defaults to 3%
 
-    def initialize_tree(self, starting_state):
+    def initialize_tree(self):
+        # reset the environment
+        self.env.reset()
+        initial_state = self.env.get_snapshot()
         return [Node(
-            state=starting_state,
+            state=initial_state,
             N=1
         )]
 
@@ -65,7 +76,7 @@ class MCTS:
                 node = lcb(node, self.c)
             return node
 
-    def score(self, snapshot, x):
+    def score(self, snapshot, x, path_rho):
         """Scoring function to return Q for a node
 
         Args:
@@ -76,8 +87,10 @@ class MCTS:
             float: Q value for a node
         """
         p_actual, p_desired = rollout_from_snapshot(self.env, self.model, snapshot, self.disturbance_dist)
-        rho = robustness(p_actual, p_desired, self.p_threshold)
-        return rho - self.lam*self.disturbance_dist.logpdf(x)
+        # we want the robustness to be the min robustness of the whole trajectory
+        rho = min(path_rho, robustness(p_actual, p_desired, self.p_threshold))
+        # clip the robustness at the failure threshold so that all failures look the same and we prioritize likelihood
+        return max(rho , 0) - self.lam*self.disturbance_dist.logpdf(x)
 
 class Node:
     def __init__(
@@ -86,7 +99,8 @@ class Node:
             parent = None,
             edge = None,
             N = 0,
-            Q = 0
+            Q = 0,
+            path_rho = np.inf,
     ):
         self.state = state
         self.parent = parent
@@ -94,6 +108,7 @@ class Node:
         self.children = []
         self.N = N
         self.Q = Q
+        self.path_rho = path_rho # minimum robustness along the path
 
         """ 
         INFO IN THE STATE SNAPSHOT DICT
@@ -130,23 +145,37 @@ class Node:
                     disturbance = x
                 )
         snapshot = alg.env.get_snapshot()
+        # get the robustness margin for this step
+        rho_step = robustness(p_actual=alg.env._p, 
+                              p_desired= alg.env.profile(alg.env.time), 
+                              p_threshold=alg.p_threshold)
+        
+        # update the child's path robustness based on this step
+        child_path_rho = min(self.path_rho, rho_step)
+
         # score the node
         q = alg.score(
             snapshot = snapshot,
-            x = x
+            x = x,
+            path_rho = self.path_rho
         )
         child_node = Node(
             state = snapshot,
             parent = self,
             edge = (last_observation, action, x),
             N=1,
-            Q=q
+            Q=q,
+            path_rho = child_path_rho
         )
         self.children.append(child_node)
         tree.append(child_node)
-
         # now it's time to backpropagate!
+        self.backpropagate(q)
+        return
+
+    def backpropagate(self, q):
         # start at the parent node of the child we just created
+        # q is the child's score
         node = self
         # when we get to the root, node.parent = None and the loop ends
         while node is not None:
@@ -156,6 +185,18 @@ class Node:
         return 
 
 
+# post-processing stuff
+def path_logp(node, dist):
+    total = 0.0
+    while node.parent is not None:
+        total += dist.logpdf(node.edge[2])
+        node = node.parent
+    return total
+
+def ranked_failures(tree, dist):
+    fails = [n for n in tree
+             if n.parent is not None and n.path_rho < 0 and n.parent.path_rho >= 0]
+    return sorted(fails, key=lambda n: path_logp(n, dist), reverse=True)
 
 
 if __name__ == "__main__":
@@ -169,19 +210,20 @@ if __name__ == "__main__":
     alg = MCTS(
         c=1, 
         k=1, 
-        alpha=1, 
+        alpha=0.5, 
         lam = 0.01,
         disturbance_dist=disturbance_dist, 
-        k_max=10, 
+        k_max=1000, 
         env=env.HolosMulti(**testing_kwargs), 
         model= load_trained_model(load_dir="train_fivemillion")
         )
     tree = alg.initialize_tree()
 
     for i in range(alg.k_max):
-        node = tree[0]
-        node.select()
-        node.expand()
+        node = alg.select(tree)
+        if not node.is_terminal():
+            node.extend(alg, tree)
 
-    print(tree)
+    plot_tree(tree, profile=alg.env.profile, p_threshold=alg.p_threshold, save_path="../../results/MCTS_power.png")
+    plot_tree_structure(tree, save_path="../../results/MCTS_tree.png")
 

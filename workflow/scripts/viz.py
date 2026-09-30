@@ -1,4 +1,5 @@
 import matplotlib.pyplot as plt
+import numpy as np
 
 
 def plot_power(history, save_dir=None):
@@ -40,3 +41,72 @@ def plot_rollouts(histories, results, save_dir=None):
             plt.savefig(f"{save_dir}/rollouts.png", dpi=300)
 
     return fig
+
+def plot_tree(tree, profile=None, p_threshold=None, save_path=None):
+    fig, ax = plt.subplots(figsize=(10, 5))
+    max_n = max(n.N for n in tree)
+    for node in tree:
+        if node.parent is None:
+            continue
+        w = node.N / max_n  # visit share, 0-1
+        ax.plot(
+            [node.parent.state["time"], node.state["time"]],
+            [node.parent.state["_p"], node.state["_p"]],
+            color="red" if node.path_rho < 0 else "tab:blue",
+            alpha=0.3 + 0.7 * w,
+            linewidth=0.5 + 2.5 * w,
+        )
+    if profile is not None:
+        ts = np.linspace(0, tree[0].state["runtime"], 200)
+        desired = np.array([float(profile(t)) for t in ts])
+        ax.plot(ts, desired, "k--", label="desired power")
+        if p_threshold is not None:
+            ax.fill_between(ts, desired * (1 - p_threshold), desired * (1 + p_threshold),
+                            color="gray", alpha=0.15, label="spec band")
+        ax.legend()
+    ax.set_xlabel("Time")
+    ax.set_ylabel("Power (fraction)")
+    ax.set_title(f"MCTS tree ({len(tree)} nodes)")
+    if save_path:
+        fig.savefig(save_path, dpi=150, bbox_inches="tight")
+    return fig, ax
+
+def plot_tree_structure(tree, save_path=None):
+    # y layout: leaves get consecutive rows, parents sit at the mean of their children
+    # (iterative post-order, since episode depth can exceed Python's recursion limit)
+    y, slot = {}, 0
+    stack = [(tree[0], False)]
+    while stack:
+        node, visited = stack.pop()
+        if node.children and not visited:
+            stack.append((node, True))
+            stack.extend((c, False) for c in reversed(node.children))
+        elif node.children:
+            y[node] = np.mean([y[c] for c in node.children])
+        else:
+            y[node] = slot
+            slot += 1
+
+    fig, ax = plt.subplots(figsize=(10, 6))
+    for n in tree:
+        if n.parent is not None:
+            ax.plot([n.parent.state["time"], n.state["time"]], [y[n.parent], y[n]],
+                    color="lightgray", linewidth=0.8, zorder=1)
+
+    max_n = max(n.N for n in tree)
+    sc = ax.scatter([n.state["time"] for n in tree], [y[n] for n in tree],
+                    s=[15 + 200 * n.N / max_n for n in tree],
+                    c=[n.Q for n in tree], cmap="viridis", zorder=2)
+    failed = [n for n in tree if n.parent is not None and n.path_rho < 0]
+    if failed:
+        ax.scatter([n.state["time"] for n in failed], [y[n] for n in failed],
+                   marker="x", color="red", s=40, zorder=3, label="failed path")
+        ax.legend()
+
+    fig.colorbar(sc, label="Q (lower = more promising)")
+    ax.set_xlabel("Time")
+    ax.set_yticks([])
+    ax.set_title(f"MCTS structure ({len(tree)} nodes)")
+    if save_path:
+        fig.savefig(save_path, dpi=150, bbox_inches="tight")
+    return fig, ax

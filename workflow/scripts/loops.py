@@ -197,6 +197,7 @@ def rollout_from_snapshot(env, model, snapshot, disturbance_distribution):
     observation = env.set_snapshot(snapshot)
     p_actual_list = []
     p_desired_list = []
+    done = False
     while env.time < env.runtime and not done:
         action, _ = model.predict(observation, deterministic=True)
         x = disturbance_distribution.sample(env.state, action)
