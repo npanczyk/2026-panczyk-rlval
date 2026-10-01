@@ -90,7 +90,7 @@ def plot_tree_structure(tree, save_path=None):
             y[node] = slot
             slot += 1
 
-    fig, ax = plt.subplots(figsize=(10, 20))
+    fig, ax = plt.subplots(figsize=(10, 16))
     for n in tree:
         if n.parent is not None:
             ax.plot([n.parent.state["time"], n.state["time"]], [y[n.parent], y[n]],

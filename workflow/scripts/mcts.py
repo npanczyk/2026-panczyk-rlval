@@ -260,8 +260,8 @@ def run_MCTS(iterations=100, sigma_power=0.01, exploration=0.5):
     alg = MCTS(
         c=exploration, # exploration constant
         k=0.5, # progressive widening constant
-        alpha=0.3, # progressive widening exponent
-        lam = 0.05, # likelihood weight for score
+        alpha=0.1, # progressive widening exponent
+        lam = 0.001, # likelihood weight for score
         disturbance_dist=disturbance_dist, 
         k_max=iterations, # max iterations
         env=env.HolosMulti(**testing_kwargs), 
@@ -291,5 +291,5 @@ def run_MCTS(iterations=100, sigma_power=0.01, exploration=0.5):
 
 
 if __name__ == "__main__":
-    run_MCTS(iterations=10, sigma_power=0.01, exploration=0.5)
+    run_MCTS(iterations=10000, sigma_power=0.01, exploration=0.08)
 
