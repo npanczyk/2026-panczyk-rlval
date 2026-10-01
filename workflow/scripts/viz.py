@@ -64,11 +64,11 @@ def plot_tree(tree, profile=None, p_threshold=None, save_path=None):
             ax.fill_between(ts, desired * (1 - p_threshold), desired * (1 + p_threshold),
                             color="gray", alpha=0.15, label="spec band")
         ax.legend()
-    ax.set_xlabel("Time")
-    ax.set_ylabel("Power (fraction)")
-    ax.set_title(f"MCTS tree ({len(tree)} nodes)")
+    ax.set_xlabel("Time, [s]")
+    ax.set_ylabel("Power Fraction, [-]")
+    # ax.set_title(f"MCTS tree ({len(tree)} nodes)")
     if save_path:
-        fig.savefig(save_path, dpi=150, bbox_inches="tight")
+        fig.savefig(save_path, dpi=400, bbox_inches="tight")
     return fig, ax
 
 def plot_tree_structure(tree, save_path=None):
@@ -103,10 +103,10 @@ def plot_tree_structure(tree, save_path=None):
                    marker="x", color="red", s=40, zorder=3, label="failed path")
         ax.legend()
 
-    fig.colorbar(sc, label="Q (lower = more promising)")
-    ax.set_xlabel("Time")
+    fig.colorbar(sc, label="Q (lower = more likely disturbances and less robust paths)")
+    ax.set_xlabel("Time, [s]")
     ax.set_yticks([])
-    ax.set_title(f"MCTS structure ({len(tree)} nodes)")
+    # ax.set_title(f"MCTS structure ({len(tree)} nodes)")
     if save_path:
-        fig.savefig(save_path, dpi=150, bbox_inches="tight")
+        fig.savefig(save_path, dpi=400, bbox_inches="tight")
     return fig, ax

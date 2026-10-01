@@ -1,5 +1,6 @@
 import numpy as np
 import pandas as pd
+import os
 import pickle
 from accessories import load_trained_model
 import fuzzing
@@ -7,6 +8,7 @@ import env
 import profiles
 from loops import rollout_from_snapshot
 from viz import plot_tree, plot_tree_structure
+from tqdm import tqdm
 
 """
 The functions in this script were inspired by Algorithm 5.10 in Algorithm's for Validation by Kochenderfer et al..
@@ -191,20 +193,77 @@ class Node:
 
 
 # post-processing stuff
-def path_logp(node, dist):
-    total = 0.0
-    while node.parent is not None:
-        total += dist.logpdf(node.edge[2])
-        node = node.parent
-    return total
+def path_logp(node, disturbance_dist):
+    """Gets the loglikelihood of the disturbances along a full path (sum of individual loglikelihoods)
 
-def ranked_failures(tree, dist):
+    Args:
+        node (Node)
+        disturbance_dist (disturbance distribution)
+
+    Returns:
+        float: loglikelihood of the disturbances along the whole path to the input node
+    """
+    total = 0.0
+    depth = 0
+    while node.parent is not None:
+        total += disturbance_dist.logpdf(node.edge[2])
+        depth += 1
+        node = node.parent
+    return total/depth if depth else 0
+
+def rank_failures(tree, disturbance_dist):
+    """Ranks the failure trajectories from a run.
+
+    Args:
+        tree (list): list of nodes after running a tree search
+        disturbance_dist (disturbance distribution)
+
+    Returns:
+        list: sorted list of failed runs
+    """
     fails = [n for n in tree
              if n.parent is not None and n.path_rho < 0 and n.parent.path_rho >= 0]
-    return sorted(fails, key=lambda n: path_logp(n, dist), reverse=True)
+    return sorted(fails, key=lambda n: path_logp(n, disturbance_dist), reverse=True)
+
+def extract_path(node):
+    """Nodes from just below the root down to `node`, in order."""
+    path = []
+    while node.parent is not None:
+        path.append(node)
+        node = node.parent
+    return path[::-1]
+
+def save_failures(tree, disturbance_dist, results_dir):
+    os.makedirs(results_dir, exist_ok=True)
+    fails = rank_failures(tree, disturbance_dist)
+    tree_idx = {id(n): i for i, n in enumerate(tree)}
+
+    rows, sequences = [], {}
+    for rank, n in enumerate(fails, start=1):
+        path = extract_path(n)
+        rows.append({
+            "rank": rank,
+            "mean_logpdf": path_logp(n, disturbance_dist),
+            "depth": len(path),
+            "fail_time": n.state["time"],
+            "path_rho": n.path_rho,
+            "tree_index": tree_idx[id(n)],
+        })
+        sequences[rank] = {
+            "disturbances": [p.edge[2] for p in path],  # Disturbance objects
+            "actions": [p.edge[1] for p in path],
+        }
+
+    pd.DataFrame(rows).to_csv(f"{results_dir}/failures.csv", index=False)
+    with open(f"{results_dir}/failure_sequences.pkl", "wb") as f:
+        pickle.dump({"root_state": tree[0].state, "sequences": sequences}, f)
+    print(f"Saved {len(fails)} failures to {results_dir}")
+    return rows
 
 def run_MCTS(iterations=100):
     results_dir = "../../results/MCTS"
+    # make sure that path exists
+    os.makedirs(results_dir, exist_ok=True)
     disturbance_dist = fuzzing.DisturbanceDistribution(
                             Do=fuzzing.Do(sigma_p=0.01, sigma_drum=0.005),
                             Da=fuzzing.Da(sigma_dtheta=0),
@@ -223,7 +282,7 @@ def run_MCTS(iterations=100):
         )
     tree = alg.initialize_tree()
 
-    for i in range(alg.k_max):
+    for i in tqdm(range(alg.k_max)):
         node = alg.select(tree)
         if node.is_terminal():
             # we need to backpropagate here so that N increases and the tree stops exploring terminal nodes
@@ -238,6 +297,9 @@ def run_MCTS(iterations=100):
     plot_tree(tree, profile=alg.env.profile, p_threshold=alg.p_threshold, save_path=f"{results_dir}/tree_{iterations}.png")
     plot_tree_structure(tree, save_path=f"{results_dir}/tree_structure_{iterations}.png")
 
+    save_failures(tree, disturbance_dist, results_dir)
+
+
 if __name__ == "__main__":
-    run_MCTS(iterations=100)
+    run_MCTS(iterations=1000)
 
