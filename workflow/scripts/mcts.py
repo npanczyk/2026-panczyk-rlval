@@ -1,5 +1,6 @@
 import numpy as np
 import pandas as pd
+import pickle
 from accessories import load_trained_model
 import fuzzing
 import env
@@ -8,7 +9,7 @@ from loops import rollout_from_snapshot
 from viz import plot_tree, plot_tree_structure
 
 """
-The algorithms in this script are based on Algorithm 5.10 in Algorithm's for Validation by Kochenderfer et al.
+The functions in this script were inspired by Algorithm 5.10 in Algorithm's for Validation by Kochenderfer et al..
 """
 
 def robustness(p_actual, p_desired, p_threshold):
@@ -86,6 +87,10 @@ class MCTS:
         Returns:
             float: Q value for a node
         """
+        # check if the path_rho, including the node we're scoring has reached failure, if so, rho will get clipped to 0, so just set it and skip the rollout
+        if path_rho < 0:
+            return -self.lam * self.disturbance_dist.logpdf(x)
+        
         p_actual, p_desired = rollout_from_snapshot(self.env, self.model, snapshot, self.disturbance_dist)
         # we want the robustness to be the min robustness of the whole trajectory
         rho = min(path_rho, robustness(p_actual, p_desired, self.p_threshold))
@@ -126,7 +131,7 @@ class Node:
     }"""
 
     def is_terminal(self):
-        if self.state["time"] >= self.state["runtime"]:
+        if self.state["time"] >= self.state["runtime"] or self.path_rho < 0:
             return True
         else:
             return False
@@ -157,7 +162,7 @@ class Node:
         q = alg.score(
             snapshot = snapshot,
             x = x,
-            path_rho = self.path_rho
+            path_rho = child_path_rho
         )
         child_node = Node(
             state = snapshot,
@@ -198,22 +203,21 @@ def ranked_failures(tree, dist):
              if n.parent is not None and n.path_rho < 0 and n.parent.path_rho >= 0]
     return sorted(fails, key=lambda n: path_logp(n, dist), reverse=True)
 
-
-if __name__ == "__main__":
-    model = load_trained_model(load_dir="train_fivemillion")
+def run_MCTS(iterations=100):
+    results_dir = "../../results/MCTS"
     disturbance_dist = fuzzing.DisturbanceDistribution(
                             Do=fuzzing.Do(sigma_p=0.01, sigma_drum=0.005),
                             Da=fuzzing.Da(sigma_dtheta=0),
                             Ds=fuzzing.Ds(),
                         )
-    training_kwargs, testing_kwargs = profiles.get_profile(name="test", max_failed_drums=0)
+    _, testing_kwargs = profiles.get_profile(name="test", max_failed_drums=0)
     alg = MCTS(
-        c=1, 
-        k=1, 
-        alpha=0.5, 
-        lam = 0.01,
+        c=1, # exploration constant
+        k=1, # progressive widening constant
+        alpha=0.5, # progressive widening exponent
+        lam = 0.01, # likelihood weight for score
         disturbance_dist=disturbance_dist, 
-        k_max=1000, 
+        k_max=iterations, # max iterations
         env=env.HolosMulti(**testing_kwargs), 
         model= load_trained_model(load_dir="train_fivemillion")
         )
@@ -221,9 +225,19 @@ if __name__ == "__main__":
 
     for i in range(alg.k_max):
         node = alg.select(tree)
-        if not node.is_terminal():
+        if node.is_terminal():
+            # we need to backpropagate here so that N increases and the tree stops exploring terminal nodes
+            node.backpropagate(node.Q)
+        else:
             node.extend(alg, tree)
 
-    plot_tree(tree, profile=alg.env.profile, p_threshold=alg.p_threshold, save_path="../../results/MCTS_power.png")
-    plot_tree_structure(tree, save_path="../../results/MCTS_tree.png")
+    # pickle the tree object
+    with open(f'{results_dir}/tree.pkl', 'wb') as file:
+        pickle.dump(tree, file)
+
+    plot_tree(tree, profile=alg.env.profile, p_threshold=alg.p_threshold, save_path=f"{results_dir}/tree_{iterations}.png")
+    plot_tree_structure(tree, save_path=f"{results_dir}/tree_structure_{iterations}.png")
+
+if __name__ == "__main__":
+    run_MCTS(iterations=100)
 
