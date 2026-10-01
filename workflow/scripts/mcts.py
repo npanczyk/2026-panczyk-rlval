@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 import os
 import pickle
-from accessories import load_trained_model
+from accessories import load_trained_model, robustness
 import fuzzing
 import env
 import profiles
@@ -13,25 +13,6 @@ from tqdm import tqdm
 """
 The functions in this script were inspired by Algorithm 5.10 in Algorithm's for Validation by Kochenderfer et al..
 """
-
-def robustness(p_actual, p_desired, p_threshold):
-    """Calculates the robustness of a trajectory defined by the actual power and the desired power for all timesteps. This is based on signal temporal logic.
-
-    Args:
-        p_actual (array): Actual achieved power
-        p_desired (array): Desired power at corresponding times to p_actual
-        p_threshold (float): power specification as a percent deviation from profile
-    """
-    # if we're at a terminal node, we won't get power arrays, so return infinity (we're going to take a min of this rho and the path rho, so path rho will always get picked if we're at a terminal node)
-    if type(p_actual) != list:
-        p_actual = np.array([p_actual])
-    if type(p_desired) != list:
-        p_desired = np.array([p_desired])
-    if len(p_actual) == 0:
-        return np.inf
-    percent_diffs = abs(np.array(p_actual) - np.array(p_desired))/np.array(p_desired)
-    rho = min(p_threshold - percent_diffs)
-    return rho
 
 
 def lcb(node, c):
@@ -79,12 +60,13 @@ class MCTS:
                 node = lcb(node, self.c)
             return node
 
-    def score(self, snapshot, x, path_rho):
+    def score(self, snapshot, x, path_rho, N=3):
         """Scoring function to return Q for a node
 
         Args:
             snapshot (dict): Snapshot of environment state from env.get_snapshot()
             x (disturbance): Disturbance object
+            N (int, optional): number of rollouts, defaults to 3
 
         Returns:
             float: Q value for a node
@@ -92,12 +74,16 @@ class MCTS:
         # check if the path_rho, including the node we're scoring has reached failure, if so, rho will get clipped to 0, so just set it and skip the rollout
         if path_rho < 0:
             return -self.lam * self.disturbance_dist.logpdf(x)
-        
-        p_actual, p_desired = rollout_from_snapshot(self.env, self.model, snapshot, self.disturbance_dist)
-        # we want the robustness to be the min robustness of the whole trajectory
-        rho = min(path_rho, robustness(p_actual, p_desired, self.p_threshold))
-        # clip the robustness at the failure threshold so that all failures look the same and we prioritize likelihood
-        return max(rho , 0) - self.lam*self.disturbance_dist.logpdf(x)
+
+        rho_list = []
+        for i in range(N):
+            p_actual, p_desired = rollout_from_snapshot(self.env, self.model, snapshot, self.disturbance_dist)
+            # we want the robustness to be the min robustness of the whole trajectory, including parent nodes, so check that
+            rho_list.append(min(path_rho, robustness(p_actual, p_desired, self.p_threshold)))
+
+        avg_rho = np.mean(np.array(rho_list))
+
+        return avg_rho - self.lam*self.disturbance_dist.logpdf(x)
 
 class Node:
     def __init__(
@@ -187,7 +173,7 @@ class Node:
         # when we get to the root, node.parent = None and the loop ends
         while node is not None:
             node.N += 1
-            node.Q += (q - node.Q) / node.N # Q values must be positive or this will break
+            node.Q += (q - node.Q) / node.N 
             q, node = node.Q, node.parent
         return 
 
@@ -260,21 +246,22 @@ def save_failures(tree, disturbance_dist, results_dir):
     print(f"Saved {len(fails)} failures to {results_dir}")
     return rows
 
-def run_MCTS(iterations=100):
-    results_dir = "../../results/MCTS"
+def run_MCTS(iterations=100, sigma_power=0.01, exploration=0.5):
+    results_dir = f"../../results/MCTS_{iterations}_sigp{sigma_power}_c{exploration}"
     # make sure that path exists
     os.makedirs(results_dir, exist_ok=True)
     disturbance_dist = fuzzing.DisturbanceDistribution(
-                            Do=fuzzing.Do(sigma_p=0.01, sigma_drum=0.005),
+                            Do=fuzzing.Do(sigma_p=sigma_power, 
+                                          sigma_drum=0.005),
                             Da=fuzzing.Da(sigma_dtheta=0),
                             Ds=fuzzing.Ds(),
                         )
     _, testing_kwargs = profiles.get_profile(name="test", max_failed_drums=0)
     alg = MCTS(
-        c=1, # exploration constant
-        k=1, # progressive widening constant
-        alpha=0.5, # progressive widening exponent
-        lam = 0.01, # likelihood weight for score
+        c=exploration, # exploration constant
+        k=0.5, # progressive widening constant
+        alpha=0.3, # progressive widening exponent
+        lam = 0.05, # likelihood weight for score
         disturbance_dist=disturbance_dist, 
         k_max=iterations, # max iterations
         env=env.HolosMulti(**testing_kwargs), 
@@ -291,8 +278,11 @@ def run_MCTS(iterations=100):
             node.extend(alg, tree)
 
     # pickle the tree object
-    with open(f'{results_dir}/tree.pkl', 'wb') as file:
-        pickle.dump(tree, file)
+    try:
+        with open(f'{results_dir}/tree.pkl', 'wb') as file:
+            pickle.dump(tree, file)
+    except RecursionError:
+        print("Recursion Error: Could not save tree!")
 
     plot_tree(tree, profile=alg.env.profile, p_threshold=alg.p_threshold, save_path=f"{results_dir}/tree_{iterations}.png")
     plot_tree_structure(tree, save_path=f"{results_dir}/tree_structure_{iterations}.png")
@@ -301,5 +291,5 @@ def run_MCTS(iterations=100):
 
 
 if __name__ == "__main__":
-    run_MCTS(iterations=1000)
+    run_MCTS(iterations=10, sigma_power=0.01, exploration=0.5)
 

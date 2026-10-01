@@ -67,6 +67,7 @@ def run_rollouts(test_profile, train_name, m, psi=check_spec):
         results[i] = psi(history)
 
     viz.plot_rollouts(histories, results, save_dir=test_folder)
+    viz.plot_robustness(history, p_threshold=0.03, time=None, ax=None, save_dir=test_folder)
 
     return histories, results
 
@@ -75,6 +76,7 @@ if __name__ == "__main__":
     run_rollouts(
         test_profile="test",
         train_name="train_fivemillion",
-        m=5,
+        m=1,
     )
+
     # run_demo()
