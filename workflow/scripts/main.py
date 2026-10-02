@@ -14,7 +14,7 @@ from tqdm import tqdm
 def run_demo():
     """Runs a demo case of a training and testing loop with minimal time_steps. Expected to perform terribly!"""
     disturbance_dist = fuzzing.DisturbanceDistribution(
-        Do=fuzzing.Do(sigma_p=0.05, sigma_drum=0.05),
+        Do=fuzzing.Do(sigma_p=0.01, sigma_drum=0.05),
         Da=fuzzing.Da(sigma_dtheta=0),
         Ds=fuzzing.Ds(),
     )
