@@ -291,5 +291,5 @@ def run_MCTS(iterations=100, sigma_power=0.01, exploration=0.5):
 
 
 if __name__ == "__main__":
-    run_MCTS(iterations=10000, sigma_power=0.01, exploration=0.08)
+    run_MCTS(iterations=100000, sigma_power=0.01, exploration=0.08)
 
