@@ -71,9 +71,6 @@ class MCTS:
         Returns:
             float: Q value for a node
         """
-        # check if the path_rho, including the node we're scoring has reached failure, if so, rho will get clipped to 0, so just set it and skip the rollout
-        if path_rho < 0:
-            return -self.lam * self.disturbance_dist.logpdf(x)
 
         rho_list = []
         for i in range(N):
@@ -259,8 +256,8 @@ def run_MCTS(iterations=100, sigma_power=0.01, exploration=0.5):
     _, testing_kwargs = profiles.get_profile(name="test", max_failed_drums=0)
     alg = MCTS(
         c=exploration, # exploration constant
-        k=0.5, # progressive widening constant
-        alpha=0.1, # progressive widening exponent
+        k=1, # progressive widening constant
+        alpha=0.25, # progressive widening exponent
         lam = 0.001, # likelihood weight for score
         disturbance_dist=disturbance_dist, 
         k_max=iterations, # max iterations
@@ -291,5 +288,5 @@ def run_MCTS(iterations=100, sigma_power=0.01, exploration=0.5):
 
 
 if __name__ == "__main__":
-    run_MCTS(iterations=100000, sigma_power=0.01, exploration=0.08)
+    run_MCTS(iterations=100, sigma_power=0.01, exploration=0.08)
 
