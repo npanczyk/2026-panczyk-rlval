@@ -30,6 +30,10 @@ class DisturbanceDistribution:
     def sample(self, state, action):
         return Disturbance(self.Do.sample(state), self.Da.sample(action), self.Ds.sample(state, action))
 
+    def logpdf(self, x):
+        # gets the log-likelihood for the disturbance, only considering observation disturbances for now
+        return self.Do.logpdf(x.xo)
+
 class Do:
     "Observation distribution for the HolosMulti env. Requires standard deviations for Gaussian distributions of disturbances for power (p) and drum angle (drum_angles). Drum angle fuzz should correspond to real physical space (0, 180 degrees). Power should correspond to fractional physical space (0, 1). Change in power (dp) is fuzzed automatically because it is calculated using fuzzy power values."
     def __init__(self, sigma_p=0.01, sigma_drum=0.005):
@@ -51,6 +55,17 @@ class Do:
             "p": self.power_dd.rvs(),
             "drum_angles": self.drum_dd.rvs(size=8)
         }
+
+    def logpdf(self, xo):
+        """Gets the log-likelihood of an observation disturbance
+
+        Args:
+            xo (Do object): Observation disturbance to quantify the log likelihood for
+
+        Returns:
+            float: log likelihood value
+        """
+        return self.power_dd.logpdf(xo["p"]) + self.drum_dd.logpdf(xo["drum_angles"]).sum()
 
 class Da:
     "Action distribution for the HolosMulti env. Requires standard deviations for Gaussian distributions of disturbances for drum angle changes (drum_angles). Noise for action space should correspond to real physical space (-0.5 deg/s, 0.5 deg/s)."

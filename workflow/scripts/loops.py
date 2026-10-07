@@ -26,7 +26,7 @@ from stable_baselines3.common.monitor import Monitor
 from accessories import find_latest_file, metrics
 from env import Undisturbed, make_undisturbed_env
 from functools import partial
-from accessories import check_spec
+from accessories import check_spec, percent_diff, load_trained_model
 
 
 def train_rl(env_type, save_dir, env_kwargs, total_timesteps=int(2e6), n_envs=10):
@@ -153,9 +153,7 @@ def test_trained_rl(env_type, load_dir, save_dir, env_kwargs, disturbance_distri
         DataFrame of the full run history (state/action trace) for
         the evaluated episode.
     """
-    model_folder = load_dir / "models/"
-    model_path = find_latest_file(model_folder, pattern="*.zip")
-    model = sb3.PPO.load(model_path, device="cpu")
+    model = load_trained_model(load_dir)
 
     test_env = env_type(**env_kwargs, save_dir=save_dir)
     history = rollout(model, test_env, disturbance_distribution, save_histories=save_histories)
@@ -171,23 +169,40 @@ def test_trained_rl(env_type, load_dir, save_dir, env_kwargs, disturbance_distri
         )
     return history
 
-def run_rollouts(rollout_fn, m, psi=check_spec):
-    """Runs m rollouts, save the trajectories and check spec compliance.
+# def run(env, obs, disturbance_list, trained_load_dir="train_fivemillion"):
+#     model_folder = trained_load_dir / "models/"
+#     model_path = find_latest_file(model_folder, pattern="*.zip")
+#     model = sb3.PPO.load(model_path, device="cpu")
+#     states = []
+#     for D in disturbance_list:
+#         action, _ = model.predict(obs, deterministic=True)
+#         obs, _, terminated, truncated = env.step(action, D)
+#         states.append(env.state.copy())
+#         if terminated or truncated:
+#             break
+#     return obs, np.array(states)
+
+def rollout_from_snapshot(env, model, snapshot, disturbance_distribution):
+    """Runs a rollout of the model from a snapshot for MCTS.
 
     Args:
-        rollout_fn (callable): no-arg function that runs one rollout and returns its history (pd.DataFrame)
-        m (int): number of rollouts
-        psi (callable): spec-check function taking a history DataFrame, returns bool
-
+        env (holos multi environment): _description_
+        model (sb3.PPO model object): loaded pre-trained model used on the entire rollout
+        snapshot (dict): snapshot of the environment state 
+        disturbance_distribution (Disturbance object from fuzzing.py)
     Returns:
-        histories (list[pd.DataFrame]), results (np.ndarray[bool]): trajectories and pass/fail per rollout
+        tuple: actual power over rollout, desired power over rollout
+
     """
-    histories = []
-    results = np.zeros(m, dtype=bool)
-
-    for i in range(m):
-        history = rollout_fn()
-        histories.append(history)
-        results[i] = psi(history)
-
-    return histories, results
+    observation = env.set_snapshot(snapshot)
+    p_actual_list = []
+    p_desired_list = []
+    done = False
+    while env.time < env.runtime and not done:
+        action, _ = model.predict(observation, deterministic=True)
+        x = disturbance_distribution.sample(env.state, action)
+        observation, _, terminated, truncated, _ = env.step(action, disturbance=x)
+        p_desired_list.append(float(env.profile(env.time)))
+        p_actual_list.append(env._p)
+        done = terminated or truncated
+    return p_actual_list, p_desired_list
