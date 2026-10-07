@@ -69,7 +69,6 @@ def run_rollouts(test_profile, train_name, m, p_sig=0.01, psi=check_spec):
     results = np.zeros(m, dtype=bool)
 
     for i in tqdm(range(m)):
-        print(f"Round {i}")
         history = loops.test_trained_rl(
             env_type=env.HolosMulti,
             load_dir=run_folder,
@@ -90,9 +89,24 @@ def run_rollouts(test_profile, train_name, m, p_sig=0.01, psi=check_spec):
 
 
 if __name__ == "__main__":
-    for sig in [0.001, 0.005, 0.01, 0.02]:
-        run_rollouts(
-            test_profile="test", train_name="train_fivemillion", m=100, p_sig=sig
+    histories_list = []
+    results_list = []
+    sigmas = [0.01, 0.005, 0.0025, 0.00125]
+    colors = ["cyan", "magenta", "blue", "tomato"]
+    for sig in sigmas:
+        h, r = run_rollouts(
+            test_profile="test", train_name="train_fivemillion", m=50, p_sig=sig
         )
+        histories_list.append(h)
+        results_list.append(r)
+
+    viz.plot_overlapping_rollouts(
+        histories_list,
+        results_list,
+        sigmas,
+        colors,
+        p_threshold=0.03,
+        save_dir="../../results/",
+    )
 
     # run_demo()
