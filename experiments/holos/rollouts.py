@@ -111,33 +111,39 @@ def run_rollouts(test_profile, model_name, run_name, m, p_sig=0.01, psi=check_sp
     return histories, results
 
 
-def rollout_from_snapshot(env, model, snapshot, disturbance_distribution):
-    """Runs a rollout of the model from a snapshot for MCTS.
+# def rollout_from_snapshot(env, model, snapshot, disturbance_distribution):
+#     """Runs a rollout of the model from a snapshot for MCTS.
 
-    Args:
-        env (holos multi environment): _description_
-        model (sb3.PPO model object): loaded pre-trained model used on the entire rollout
-        snapshot (dict): snapshot of the environment state
-        disturbance_distribution (Disturbance object from fuzzing.py)
-    Returns:
-        tuple: actual power over rollout, desired power over rollout
-    """
-    observation = env.set_snapshot(snapshot)
-    p_actual_list = []
-    p_desired_list = []
-    done = False
-    while env.time < env.runtime and not done:
-        action, _ = model.predict(observation, deterministic=True)
-        x = disturbance_distribution.sample(env.state, action)
-        observation, _, terminated, truncated, _ = env.step(action, disturbance=x)
-        p_desired_list.append(float(env.profile(env.time)))
-        p_actual_list.append(env._p)
-        done = terminated or truncated
-    return p_actual_list, p_desired_list
+#     Args:
+#         env (holos multi environment): _description_
+#         model (sb3.PPO model object): loaded pre-trained model used on the entire rollout
+#         snapshot (dict): snapshot of the environment state
+#         disturbance_distribution (Disturbance object from fuzzing.py)
+#     Returns:
+#         tuple: actual power over rollout, desired power over rollout
+#     """
+#     observation = env.set_snapshot(snapshot)
+#     p_actual_list = []
+#     p_desired_list = []
+#     done = False
+#     while env.time < env.runtime and not done:
+#         action, _ = model.predict(observation, deterministic=True)
+#         x = disturbance_distribution.sample(env.state, action)
+#         observation, _, terminated, truncated, _ = env.step(action, disturbance=x)
+#         p_desired_list.append(float(env.profile(env.time)))
+#         p_actual_list.append(env._p)
+#         done = terminated or truncated
+#     return p_actual_list, p_desired_list
 
 
 def overlapping_rollouts(test_profile, model_name, run_name):
-    """THIS DOESN"T WORK YET!"""
+    """_summary_
+
+    Args:
+        test_profile (_type_): _description_
+        model_name (_type_): _description_
+        run_name (_type_): _description_
+    """
     histories_list = []
     results_list = []
     sigmas = [0.01, 0.005, 0.0025, 0.00125]

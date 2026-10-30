@@ -20,9 +20,9 @@ class DisturbanceDistribution:
     def __init__(self, Do, Da, Ds):
         """
         Args:
-            Do (function): Observation (sensor) disturbance distribution
-            Da (function): Agent disturbance distribution
-            Ds (function): State (environment) distribution
+            Do (class): Observation (sensor) disturbance distribution. Must be a class that has a sample() method that returns a dictionary with disturbed quantities (str) as keys and disturbance value (float) as values and a logpdf() method that returns a float.
+            Da (class): Agent disturbance distribution. Must be a class that has a sample() method that returns a dictionary with disturbed quantities as keys (str) and disturbance value (float) as values and a logpdf() method that returns a float.
+            Ds (class): State (environment) distribution. Must be a class that has a sample() method that returns a dictionary with disturbed quantities as keys (str) and disturbance value (float) as values and a logpdf() method that returns a float.
         """
         self.Do = Do
         self.Da = Da

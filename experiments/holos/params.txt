@@ -1,6 +1,0 @@
-env type: <class 'env.HolosMulti'>
-training profile: default
-episode length: 200
-dt (timestep length): 1 seconds
-total training timesteps (all envs): 600
-number of parallel envs: 10

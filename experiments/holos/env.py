@@ -24,6 +24,7 @@ from pathlib import Path
 import warnings
 from helpers import scale, descale
 from veery import fuzzing
+from veery import accessories
 
 
 class Undisturbed(gym.Wrapper):
@@ -210,14 +211,19 @@ class HolosMulti(gym.Env):
         # increment time by 1 step
         self.time += self.dt
         # convert action to real space with noise added from xa and masks applied. noise should be in physical space!
-        real_action = (descale(action, "dtheta") + disturbance.xa) * self.masks
+        real_action = (
+            descale(action, "dtheta") + disturbance.xa["dtheta"]
+        ) * self.masks
         # get the linearly interpolated function for the drums
         drum_forcers = self.pke.drum_forcing(self._drum_angles, real_action)
         # update the environment state
         # solve PKE
         sol = solve_ivp(self.pke.reactor_dae, [0, 1], self.state, args=drum_forcers)
         # get the state and add noise with xs
-        self.state = sol.y[:, -1] + disturbance.xs
+        # first we have to convert the dictionary values to an array for easy adding to the derivatives from point kinetics
+        STATE_ORDER = ["nr", "precursors", "Tf", "Tm", "Tc", "xe", "i"]
+        xs_vec = np.concatenate([np.atleast_1d(disturbance.xs[k]) for k in STATE_ORDER])
+        self.state = sol.y[:, -1] + xs_vec
         # update the power level according to new neutron density from PKE
         self._p, *_ = self.state
         # get the next desired power from the profile
@@ -303,6 +309,37 @@ class HolosMulti(gym.Env):
         self._last_observation = {k: v.copy() for k, v in snap["observation"].items()}
         # re-generate the observation dict here to prevent future corruptions from modifying an attribute
         return {k: v.copy() for k, v in snap["observation"].items()}
+
+    def rollout_from_snapshot(self, model, snap, disturbance_distribution):
+        """Runs a rollout of a pretrained model from a snapshot.
+
+        Args:
+            model (sb3.PPO model object): loaded pre-trained model used on the entire rollout
+            snapshot (dict): snapshot of the environment state
+            disturbance_distribution (Disturbance object from fuzzing.py)
+        Returns:
+            tuple: actual power over rollout, desired power over rollout
+        """
+        observation = self.set_snapshot(snap)
+        actual_power = []
+        desired_power = []
+        done = False
+        while self.time < self.runtime and not done:
+            action, _ = model.predict(observation, deterministic=True)
+            x = disturbance_distribution.sample(state=self.state, action=action)
+            observation, _, terminated, truncated, _ = self.step(action, disturbance=x)
+            actual_power.append(self._p)
+            desired_power.append(float(self.profile(self.time)))
+            done = terminated or truncated
+        return actual_power, desired_power
+
+    def state_robustness(self, threshold):
+        """Gets the robustness of the current state
+
+        Args:
+            threshold (float): threshold for percent deviation from desired power
+        """
+        return accessories.robustness(self._p, self.profile(self.time), threshold)
 
     def render(self, save=True):
         """Converts the history list of lists into a dataframe."""

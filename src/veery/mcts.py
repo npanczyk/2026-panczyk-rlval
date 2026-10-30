@@ -2,20 +2,22 @@ import numpy as np
 import pandas as pd
 import os
 import pickle
-from accessories import load_trained_model, robustness
-import fuzzing
-import env
-import profiles
-from loops import rollout_from_snapshot
-from viz import plot_tree, plot_tree_structure
+from veery.accessories import robustness
+from veery.fuzzing import Disturbance, DisturbanceDistribution
+from veery.viz import plot_tree, plot_tree_structure
 from tqdm import tqdm
-
-"""
-The functions in this script were inspired by Algorithm 5.10 in Algorithm's for Validation by Kochenderfer et al..
-"""
 
 
 def lcb(node, c):
+    """Calculates the lower confidence bounds for all of a node's children and returns the node with the minimum LCB.
+
+    Args:
+        node (Node): Node from which a child is being chosen
+        c (float): Exploration coefficient. Higher values preference exploration while lower values preference exploitation.
+
+    Returns:
+        Node: best child node to select based on LCB scores of all child nodes
+    """
     Qs = [node.Q for node in node.children]
     Ns = [node.N for node in node.children]
     lcbs = []
@@ -29,7 +31,7 @@ def lcb(node, c):
 
 class MCTS:
     def __init__(
-        self, c, k, alpha, lam, disturbance_dist, k_max, env, model, p_threshold=0.03
+        self, c, k, alpha, lam, disturbance_dist, k_max, environment, model, threshold
     ):
         self.c = c  # exploration constant
         self.k = k  # progressive widening constant
@@ -39,16 +41,14 @@ class MCTS:
             disturbance_dist  # sampling returns x, a disturbance object
         )
         self.k_max = k_max  # number of iterations
-        self.env = env
+        self.environment = environment
         self.model = model
-        self.p_threshold = (
-            p_threshold  # power deviation threshold percent diff, defaults to 3%
-        )
+        self.threshold = threshold  # specification threshold
 
     def initialize_tree(self):
         # reset the environment
-        self.env.reset()
-        initial_state = self.env.get_snapshot()
+        self.environment.reset()
+        initial_state = self.environment.get_snapshot()
         return [Node(state=initial_state, N=1)]
 
     def select(self, tree):
@@ -68,7 +68,7 @@ class MCTS:
 
         Args:
             snapshot (dict): Snapshot of environment state from env.get_snapshot()
-            x (disturbance): Disturbance object
+            x (Disturbance): Disturbance that led to node of interest
             N (int, optional): number of rollouts, defaults to 3
 
         Returns:
@@ -77,15 +77,18 @@ class MCTS:
 
         rho_list = []
         for i in range(N):
-            p_actual, p_desired = rollout_from_snapshot(
-                self.env, self.model, snapshot, self.disturbance_dist
+            actual, desired = self.environment.rollout_from_snapshot(
+                model=self.model,
+                snap=snapshot,
+                disturbance_distribution=self.disturbance_dist,
             )
-            # we want the robustness to be the min robustness of the whole trajectory, including parent nodes, so check that
-            rho_list.append(
-                min(path_rho, robustness(p_actual, p_desired, self.p_threshold))
-            )
+            # we want the robustness to be the min robustness of the whole trajectory, including parent nodes, so check for min between path and sampled rollout
+            rho_list.append(min(path_rho, robustness(actual, desired, self.threshold)))
 
         avg_rho = np.mean(np.array(rho_list))
+        print(avg_rho)
+        print(self.lam)
+        print(self.disturbance_dist.logpdf(x))
 
         return avg_rho - self.lam * self.disturbance_dist.logpdf(x)
 
@@ -108,21 +111,6 @@ class Node:
         self.Q = Q
         self.path_rho = path_rho  # minimum robustness along the path
 
-        """ 
-        INFO IN THE STATE SNAPSHOT DICT
-        {
-        "time": self.time,
-        "runtime": self.runtime,
-        "state": self.state.copy(),
-        "_p": self._p,
-        "_pnext": self._pnext,
-        "_dp": self._dp,
-        "_drum_angles": self._drum_angles.copy(),
-        "masks": self.masks.copy(),
-        "observation": {k: v.copy() for k, v in self._last_observation.items()},
-        "last_history_row": list(self.history[-1]),
-    }"""
-
     def is_terminal(self):
         if self.state["time"] >= self.state["runtime"] or self.path_rho < 0:
             return True
@@ -131,22 +119,22 @@ class Node:
 
     def extend(self, alg, tree):
         # reset the environment to the node's state
-        alg.env.set_snapshot(self.state)
+        alg.environment.set_snapshot(self.state)
         # get edge info
         last_observation = self.state["observation"]
-        action, _states = alg.model.predict(last_observation, deterministic=True)
+        action, _ = alg.model.predict(observation=last_observation, deterministic=True)
         # sample a disturbance distribution using the environment's state and action we just predicted
-        x = alg.disturbance_dist.sample(alg.env.state, action)
+        x = alg.disturbance_dist.sample(state=alg.environment.state, action=action)
+        print(f"x: {x}, {type(x)}")
+        print(f"action: {action}, {type(action)}")
         # now we actually create the node, by taking a step
-        obs, _, terminated, truncated, _ = alg.env.step(action=action, disturbance=x)
-        snapshot = alg.env.get_snapshot()
-        # get the robustness margin for this step
-        rho_step = robustness(
-            actual=alg.env._p,
-            desired=alg.env.profile(alg.env.time),
-            threshold=alg.p_threshold,
+        obs, _, terminated, truncated, _ = alg.environment.step(
+            action=action, disturbance=x
         )
-
+        # take a snapshot of the environment at this updated state
+        snapshot = alg.environment.get_snapshot()
+        # get the robustness margin for this step
+        rho_step = alg.environment.state_robustness(threshold=alg.threshold)
         # update the child's path robustness based on this step
         child_path_rho = min(self.path_rho, rho_step)
 
@@ -256,15 +244,26 @@ def save_failures(tree, disturbance_dist, results_dir):
 
 
 def run_MCTS(
-    run_name, environment, model, iterations=100, sigma_power=0.01, hyperparams=None
+    environment,
+    model,
+    disturbance_dist,
+    results_path,
+    threshold,
+    iterations=100,
+    hyperparams=None,
 ):
-    # define a disturbance distribution
-    disturbance_dist = fuzzing.DisturbanceDistribution(
-        Do=fuzzing.Do(sigma_p=sigma_power, sigma_drum=0.005),
-        Da=fuzzing.Da(sigma_dtheta=0),
-        Ds=fuzzing.Ds(),
-    )
+    """Runs Monte Carlo Tree Search for number of defined iterations.
 
+    Args:
+        run_name (_type_): _description_
+        environment (_type_): _description_
+        model (_type_): _description_
+        disturbance_dist (_type_): _description_
+        results_path (_type_): _description_
+        threshold (_type_): _description_
+        iterations (int, optional): _description_. Defaults to 100.
+        hyperparams (_type_, optional): _description_. Defaults to None.
+    """
     # define the algorithm
     if hyperparams is None:
         hyperparams = {
@@ -281,8 +280,9 @@ def run_MCTS(
         lam=hyperparams["lambda"],  # likelihood weight for score
         disturbance_dist=disturbance_dist,
         k_max=iterations,  # max iterations
-        env=environment,
+        environment=environment,
         model=model,
+        threshold=threshold,  # error tolerance for determining failures
     )
 
     tree = alg.initialize_tree()
@@ -297,22 +297,22 @@ def run_MCTS(
 
     # pickle the tree object
     try:
-        with open(f"results/{run_name}/tree.pkl", "wb") as file:
+        with open(f"{results_path}/tree.pkl", "wb") as file:
             pickle.dump(tree, file)
     except RecursionError:
         print("Recursion Error: Could not save tree!")
 
     plot_tree(
         tree,
-        profile=alg.env.profile,
-        p_threshold=alg.p_threshold,
-        save_path=f"results/{run_name}/tree_{iterations}.png",
+        profile=alg.environment.profile,
+        p_threshold=alg.threshold,
+        save_path=f"{results_path}/tree_{iterations}.png",
     )
     plot_tree_structure(
-        tree, save_path=f"results/{run_name}/tree_structure_{iterations}.png"
+        tree, save_path=f"{results_path}/tree_structure_{iterations}.png"
     )
 
-    save_failures(tree, disturbance_dist, f"results/{run_name}/")
+    save_failures(tree, disturbance_dist, {results_path})
 
 
 if __name__ == "__main__":

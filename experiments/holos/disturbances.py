@@ -31,9 +31,8 @@ class Do:
         Returns:
             float: log likelihood value
         """
-        return (
-            self.power_dd.logpdf(xo["p"]) + self.drum_dd.logpdf(xo["drum_angles"]).sum()
-        )
+        l = self.power_dd.logpdf(xo["p"]) + self.drum_dd.logpdf(xo["drum_angles"]).sum()
+        return l
 
 
 class Da:
@@ -52,7 +51,7 @@ class Da:
         Returns:
             numpy array: 8 element array with disturbances for dtheta
         """
-        return self.dtheta_dd.rvs(size=8)
+        return {"dtheta": self.dtheta_dd.rvs(size=8)}
 
     def logpdf(self, xa):
         """Gets the log-likelihood of an observation disturbance
@@ -63,7 +62,7 @@ class Da:
         Returns:
             float: log likelihood value
         """
-        return self.dtheta_dd.logpdf(xa).sum()
+        return self.dtheta_dd.logpdf(xa["dtheta"]).sum()
 
 
 class Ds:
@@ -71,13 +70,13 @@ class Ds:
 
     def __init__(
         self,
-        sigma_nr=0,
-        sigma_precursors=0,
-        sigma_Tf=0,
-        sigma_Tm=0,
-        sigma_Tc=0,
-        sigma_xe=0,
-        sigma_i=0,
+        sigma_nr=0.00001,
+        sigma_precursors=0.00001,
+        sigma_Tf=0.00001,
+        sigma_Tm=0.00001,
+        sigma_Tc=0.00001,
+        sigma_xe=0.00001,
+        sigma_i=0.00001,
     ):
         # initialize the disturbance distributions for the state variables
         self.nr_dd = norm(0, sigma_nr)  # neutron density dd
@@ -97,7 +96,7 @@ class Ds:
         # xe = self.xe0  # xenon concentration
         # i = self.i0  # iodine concentration
 
-    def sample(self, state=None, action=None, return_format="dict"):
+    def sample(self, state=None, action=None):
         """Samples disturbances for one step of state computation.
 
         Args:
@@ -106,31 +105,18 @@ class Ds:
             return_format (str, optional): Whether the sample disturbance should be returned as a dict or an array. Defaults to "array".
 
         Returns:
-            either numpy array or dict: set of disturbances across all state variables
+            dict: set of disturbances across all state variables
         """
-        if return_format == "array":
-            return np.concatenate(
-                [
-                    [self.nr_dd.rvs()],
-                    self.precursor_dd.rvs(size=6),
-                    [self.Tf_dd.rvs()],
-                    [self.Tm_dd.rvs()],
-                    [self.Tc_dd.rvs()],
-                    [self.xe_dd.rvs()],
-                    [self.i_dd.rvs()],
-                ]
-            )
 
-        elif return_format == "dict":
-            return {
-                "nr": self.nr_dd.rvs(),
-                "precursors": self.precursor_dd.rvs(size=6),
-                "Tf": self.Tf_dd.rvs(),
-                "Tm": self.Tm_dd.rvs(),
-                "Tc": self.Tc_dd.rvs(),
-                "xe": self.xe_dd.rvs(),
-                "i": self.i_dd.rvs(),
-            }
+        return {
+            "nr": self.nr_dd.rvs(),
+            "precursors": self.precursor_dd.rvs(size=6),
+            "Tf": self.Tf_dd.rvs(),
+            "Tm": self.Tm_dd.rvs(),
+            "Tc": self.Tc_dd.rvs(),
+            "xe": self.xe_dd.rvs(),
+            "i": self.i_dd.rvs(),
+        }
 
     def logpdf(self, xs):
         llnr = self.nr_dd.logpdf(xs["nr"])
