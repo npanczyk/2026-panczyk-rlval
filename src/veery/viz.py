@@ -1,35 +1,17 @@
 import matplotlib.pyplot as plt
 import numpy as np
 from veery.accessories import percent_diff, robustness
+from pathlib import Path
 
 
-def plot_power(history, save_dir=None):
-    fig, ax = plt.subplots(figsize=(10, 6))
-    ax.plot(history["time"], history["desired_power"], label="Desired Power")
-    ax.plot(history["time"], history["observed_power"], label="Observed Power")
-    ax.plot(
-        history["time"],
-        history["actual_power"],
-        linestyle="dashed",
-        label="Actual Power",
-    )
-    ax.legend()
-    ax.set_xlabel("Time, [s]")
-    ax.set_ylabel("Fraction of Total Power")
-    ax.grid()
-    fig.tight_layout()
-    if save_dir:
-        plt.savefig(f"{save_dir}/power.png", dpi=300)
-
-    return fig
-
-
-def plot_rollouts(histories, results, save_dir=None):
-    """Plots power vs time for a set of rollouts, colored green (pass) or red (fail).
+def plot_rollouts(histories, results, save_dir=None, ylabel="Actual Value"):
+    """Plots actual (true) value vs time for a set of rollouts, colored green (pass) or red (fail).
 
     Args:
-        histories (list[pd.DataFrame]): rollout histories, each with 'time' and 'actual_power'
+        histories (list[pd.DataFrame]): rollout histories, each with 'Time' and 'Actual'
         results (np.ndarray[bool]): pass/fail per history, same order and length as histories
+        save_dir (str, opt): path to the folder in which to save the file. Defaults to None and doesn't save figure.
+        ylabel (str, opt): y-axis label text. Defaults to "Actual Value" without units.
 
     Returns:
         matplotlib.figure.Figure
@@ -47,10 +29,11 @@ def plot_rollouts(histories, results, save_dir=None):
         )
 
     ax.set_xlabel("Time, [s]")
-    ax.set_ylabel("Fraction of Total Power")
+    ax.set_ylabel(ylabel)
     ax.set_title(f"Failures: {len(results) - results.sum()}/{len(results)}")
     fig.tight_layout()
     if save_dir:
+        Path(save_dir).mkdir(exist_ok=True)
         plt.savefig(f"{save_dir}/rollouts.png", dpi=300)
 
     return fig
@@ -62,8 +45,8 @@ def plot_overlapping_rollouts(
     sigmas,
     colors,
     threshold=0.03,
-    save_as=None,
-    output_name=None,
+    save_dir=None,
+    ylabel="Value of Interest",
 ):
     """Plots power vs time for a set of rollouts, colored green (pass) or red (fail).
 
@@ -73,8 +56,8 @@ def plot_overlapping_rollouts(
         sigmas (list): standard deviations for the disturbance distribution
         colors (list): list of matplotlib colors the same length as sigmas
         threshold (float): percent error tolerance for any given timestep
-        save_as (str): file path with file name and extension to save the figure
-        output_name (str): the name of the output variable used in the spec calculation. Note: this is directly used for the y-axis label, format accordingly.
+        save_dir (str, opt): file path for location to save the file. Defaults to None and doesn't save the file.
+        ylabel (str): the name of the output variable used in the spec calculation. Note: this is directly used for the y-axis label, format accordingly.
 
     Returns:
         matplotlib.figure.Figure
@@ -107,7 +90,7 @@ def plot_overlapping_rollouts(
                     color=color,
                     alpha=0.5,
                     linewidth=0.8,
-                    label=r"$\sigma_p=$" + f"{sig}, Failures={failures}/{len(results)}",
+                    label=r"$\sigma=$" + f"{sig}, Failures={failures}/{len(results)}",
                 )
             else:
                 ax.plot(
@@ -119,19 +102,28 @@ def plot_overlapping_rollouts(
                 )
 
     ax.set_xlabel("Time, [s]")
-    if output_name is None:
-        ax.set_ylabel("Output Variable")
-    else:
-        ax.set_ylabel(output_name)
+    ax.set_ylabel(ylabel)
     ax.legend()
     fig.tight_layout()
-    if save_as:
-        plt.savefig(save_as, dpi=400)
+    if save_dir:
+        Path(save_dir).mkdir(exist_ok=True)
+        plt.savefig(f"{save_dir}/overlapping_rollouts.png", dpi=400)
 
     return fig
 
 
 def plot_tree(tree, profile=None, threshold=None, save_path=None):
+    """_summary_
+
+    Args:
+        tree (_type_): _description_
+        profile (_type_, optional): _description_. Defaults to None.
+        threshold (_type_, optional): _description_. Defaults to None.
+        save_path (_type_, optional): _description_. Defaults to None.
+
+    Returns:
+        _type_: _description_
+    """
     fig, ax = plt.subplots(figsize=(10, 5))
     max_n = max(n.N for n in tree)
     for node in tree:

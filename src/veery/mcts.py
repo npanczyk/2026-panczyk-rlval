@@ -310,4 +310,4 @@ def run_MCTS(
 
 
 if __name__ == "__main__":
-    run_MCTS(iterations=100, sigma_power=0.01, exploration=0.08)
+    tree = run_MCTS(iterations=10, sigma_power=0.01, exploration=0.08)

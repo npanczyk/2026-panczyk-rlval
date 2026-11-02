@@ -67,17 +67,38 @@ class InvertedPendulum:
         self.alpha = np.array(
             [[-15, -8]]
         )  # (1 x 2) gain matrix for proportional control
+        # define a constant profile so that we can calculate robustness
+        self.profile = lambda t: 0
 
-    def get_initial_state(self):
+    def reset(self):
+        self.time = 0
         theta0 = np.random.uniform(-np.pi / 16, np.pi / 16)
         w0 = np.random.uniform(-1.0, 1.0)
-        return theta0, w0
+        xo = {"theta": 0, "omega": 0}
+        observation = self._get_observation(xo, reset=True)
+        self._log_history(observation=observation, init=True)
+        self._last_observation = observation
+        return observation
 
-    def get_observation(self, s, xo):
+    def _get_observation(self, xo):
         # additive noise sensor
         # grab disturbance distribution from init and sample
-        s = np.array([[s[0]], [s[1]]])
-        return s + xo
+        # s = np.array([[s[0]], [s[1]]])
+        # return s + xo
+        return {"theta": self._theta + xo["theta"], "omega": self._omega + xo["omega"]}
+
+    def _log_history(self, observation, init=False):
+        if init:
+            self.history = [
+                [
+                    self.time,
+                    observation["theta"].item(),  # observed angle
+                    self.profile(self.time),  # desired angle
+                    observation["omega"].item(),  # observed angular velocity
+                    *self.state,  # includes actual power
+                ]
+            ]
+            return
 
     def get_action(self, o, xa):
         # proportional counter
@@ -102,7 +123,8 @@ class InvertedPendulum:
         w = clamp(w, -1 * self.w_max, self.w_max)
         return theta + xs[0, 0], w + xs[1, 0]
 
-    def step(self, s, disturbance_dist):
+    def step(self, action, disturbance):
+        self.time += self.dt
         xo = disturbance_dist.Do.rvs(size=(2, 1))
         o = self.get_observation(s, xo)
         xa = disturbance_dist.Da.rvs(size=1)
