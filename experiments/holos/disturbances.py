@@ -1,5 +1,6 @@
 from scipy.stats import norm
 import numpy as np
+from veery.fuzzing import ZeroDist
 
 
 class Do:
@@ -8,8 +9,14 @@ class Do:
     def __init__(self, sigma_p=0.01, sigma_drum=0.005):
         # initialize the disturbance distributions for the observation variables
         # DO NOT disturb pnext (assume the controller reads the prescribed power correctly)
-        self.power_dd = norm(0, sigma_p)
-        self.drum_dd = norm(0, sigma_drum)
+        if sigma_drum == 0:
+            self.drum_dd = ZeroDist()
+        else:
+            self.drum_dd = norm(0, sigma_drum)
+        if sigma_p == 0:
+            self.power_dd = ZeroDist()
+        else:
+            self.power_dd = norm(0, sigma_p)
 
     def sample(self, state=None):
         """Gets an observation disturbance (adds sensor noise) for a single step
@@ -38,9 +45,12 @@ class Do:
 class Da:
     "Action distribution for the HolosMulti env. Requires standard deviations for Gaussian distributions of disturbances for drum angle changes (drum_angles). Noise for action space should correspond to real physical space (-0.5 deg/s, 0.5 deg/s)."
 
-    def __init__(self, sigma_dtheta=0.001):
+    def __init__(self, sigma_dtheta=0):
         # initialize the disturbance distributions for the action variables
-        self.dtheta_dd = norm(0, sigma_dtheta)
+        if sigma_dtheta == 0:
+            self.dtheta_dd = ZeroDist()
+        else:
+            self.dtheta_dd = norm(0, sigma_dtheta)
 
     def sample(self, observation=None):
         """Gets an action disturbance list for all drums for a single step
@@ -70,31 +80,28 @@ class Ds:
 
     def __init__(
         self,
-        sigma_nr=0.00001,
-        sigma_precursors=0.00001,
-        sigma_Tf=0.00001,
-        sigma_Tm=0.00001,
-        sigma_Tc=0.00001,
-        sigma_xe=0.00001,
-        sigma_i=0.00001,
+        sigma_nr=0,  # neutron density
+        sigma_precursors=0,  # precursor concentration
+        sigma_Tf=0,  # fuel temperature
+        sigma_Tm=0,  # moderator temperature
+        sigma_Tc=0,  # coolant temperature
+        sigma_xe=0,  # xenon concentration
+        sigma_i=0,  # iodine concentration
     ):
-        # initialize the disturbance distributions for the state variables
-        self.nr_dd = norm(0, sigma_nr)  # neutron density dd
-        self.precursor_dd = norm(0, sigma_precursors)  # precursor concentration dd
-        self.Tf_dd = norm(0, sigma_Tf)  # fuel temperature
-        self.Tm_dd = norm(0, sigma_Tm)  # moderator temperature
-        self.Tc_dd = norm(0, sigma_Tc)  # coolant temperature
-        self.xe_dd = norm(0, sigma_xe)  # xenon concentration
-        self.i_dd = norm(0, sigma_i)  # iodine concentration
-
-        # STATE VARIABLES FOR REFERENCE
-        # n_r = 1  # neutron density
-        # c1, c2, c3, c4, c5, c6 = [n_r] * 6  # precursor concentrations
-        # Tf = self.Tf0  # fuel temp
-        # Tm = self.Tm0  # moderator temp
-        # Tc = self.Tc0  # coolant temp
-        # xe = self.xe0  # xenon concentration
-        # i = self.i0  # iodine concentration
+        sigmas = {
+            "nr_dd": sigma_nr,
+            "precursor_dd": sigma_precursors,
+            "Tf_dd": sigma_Tf,
+            "Tm_dd": sigma_Tm,
+            "Tc_dd": sigma_Tc,
+            "xe_dd": sigma_xe,
+            "i_dd": sigma_i,
+        }
+        for k, v in sigmas.items():
+            if v == 0:
+                setattr(self, k, ZeroDist())
+            else:
+                setattr(self, k, norm(0, v))
 
     def sample(self, state=None, action=None):
         """Samples disturbances for one step of state computation.
@@ -127,4 +134,4 @@ class Ds:
         llxe = self.xe_dd.logpdf(xs["xe"])
         lli = self.i_dd.logpdf(xs["i"])
 
-        return llnr + llpc + lltf + lltm + lltc + llxe + lli
+        return (llnr + llpc + lltf + lltm + lltc + llxe + lli).sum()

@@ -6,6 +6,7 @@ from veery.accessories import robustness
 from veery.fuzzing import Disturbance, DisturbanceDistribution
 from veery.viz import plot_tree, plot_tree_structure
 from tqdm import tqdm
+from pathlib import Path
 
 
 def lcb(node, c):
@@ -86,11 +87,10 @@ class MCTS:
             rho_list.append(min(path_rho, robustness(actual, desired, self.threshold)))
 
         avg_rho = np.mean(np.array(rho_list))
-        print(avg_rho)
-        print(self.lam)
-        print(self.disturbance_dist.logpdf(x))
 
-        return avg_rho - self.lam * self.disturbance_dist.logpdf(x)
+        # get the loglikelihood of the observation disturbance only! not including action or state disturbances now
+        obs_ll = self.disturbance_dist.logpdf(x)[0]
+        return avg_rho - self.lam * obs_ll
 
 
 class Node:
@@ -125,8 +125,6 @@ class Node:
         action, _ = alg.model.predict(observation=last_observation, deterministic=True)
         # sample a disturbance distribution using the environment's state and action we just predicted
         x = alg.disturbance_dist.sample(state=alg.environment.state, action=action)
-        print(f"x: {x}, {type(x)}")
-        print(f"action: {action}, {type(action)}")
         # now we actually create the node, by taking a step
         obs, _, terminated, truncated, _ = alg.environment.step(
             action=action, disturbance=x
@@ -180,7 +178,8 @@ def path_logp(node, disturbance_dist):
     total = 0.0
     depth = 0
     while node.parent is not None:
-        total += disturbance_dist.logpdf(node.edge[2])
+        # index 0th position to get logpdf of the observation only!
+        total += disturbance_dist.logpdf(node.edge[2])[0]
         depth += 1
         node = node.parent
     return total / depth if depth else 0
@@ -213,8 +212,8 @@ def extract_path(node):
     return path[::-1]
 
 
-def save_failures(tree, disturbance_dist, results_dir):
-    os.makedirs(results_dir, exist_ok=True)
+def save_failures(tree, disturbance_dist, results_path):
+    Path(results_path).mkdir(exist_ok=True)
     fails = rank_failures(tree, disturbance_dist)
     tree_idx = {id(n): i for i, n in enumerate(tree)}
 
@@ -236,10 +235,10 @@ def save_failures(tree, disturbance_dist, results_dir):
             "actions": [p.edge[1] for p in path],
         }
 
-    pd.DataFrame(rows).to_csv(f"{results_dir}/failures.csv", index=False)
-    with open(f"{results_dir}/failure_sequences.pkl", "wb") as f:
+    pd.DataFrame(rows).to_csv(f"{results_path}/failures.csv", index=False)
+    with open(f"{results_path}/failure_sequences.pkl", "wb") as f:
         pickle.dump({"root_state": tree[0].state, "sequences": sequences}, f)
-    print(f"Saved {len(fails)} failures to {results_dir}")
+    print(f"Saved {len(fails)} failures to {results_path}")
     return rows
 
 
@@ -264,6 +263,9 @@ def run_MCTS(
         iterations (int, optional): _description_. Defaults to 100.
         hyperparams (_type_, optional): _description_. Defaults to None.
     """
+    # check the path and make folders if necessary
+    Path(results_path).mkdir(parents=True, exist_ok=True)
+
     # define the algorithm
     if hyperparams is None:
         hyperparams = {
@@ -302,17 +304,9 @@ def run_MCTS(
     except RecursionError:
         print("Recursion Error: Could not save tree!")
 
-    plot_tree(
-        tree,
-        profile=alg.environment.profile,
-        p_threshold=alg.threshold,
-        save_path=f"{results_path}/tree_{iterations}.png",
-    )
-    plot_tree_structure(
-        tree, save_path=f"{results_path}/tree_structure_{iterations}.png"
-    )
+    save_failures(tree, disturbance_dist, results_path)
 
-    save_failures(tree, disturbance_dist, {results_path})
+    return tree
 
 
 if __name__ == "__main__":

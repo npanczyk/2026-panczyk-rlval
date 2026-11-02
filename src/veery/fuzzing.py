@@ -2,6 +2,36 @@ from scipy.stats import norm
 import numpy as np
 
 
+class ZeroDist:
+    def __init__(self):
+        return
+
+    def rvs(self, size=None):
+        """Samples from a "zero distribution" (deterministic)
+
+        Args:
+            size (int, optional): Number of samples to be drawn. Defaults to None.
+
+        Returns:
+            Numpy array or float: Random samples
+        """
+        if size:
+            return np.zeros(size)
+        else:
+            return 0.0
+
+    def logpdf(self, x):
+        """Gets the loglikelihood given a sample and returns 0 for deterministic runs.
+
+        Args:
+            x (array_like): The disturbance value/sample you want the loglikelihood of
+
+        Returns:
+            array: Zero array
+        """
+        return np.zeros(1)
+
+
 class Disturbance:
     def __init__(self, xo, xa, xs):
         """
