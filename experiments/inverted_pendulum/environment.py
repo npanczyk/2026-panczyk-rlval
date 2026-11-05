@@ -3,14 +3,20 @@ from scipy.stats import norm
 from helpers import clamp
 import pandas as pd
 from veery import accessories
+from time import time
+from pathlib import Path
+from tqdm import tqdm
 
 
 class InvertedPendulum:
-    def __init__(self, m, l, dt, episode_length):
+    def __init__(self, m, l, dt, episode_length, save_dir):
         self.m = m  # mass of the pendulum
         self.l = l  # length of the pendulum
         self.dt = dt  # time step in seconds
         self.episode_length = episode_length  # in seconds
+        self.save_dir = save_dir  # where to save results
+        # check the path and make sure it's valid
+        Path(save_dir).mkdir(parents=True, exist_ok=True)
         self.runtime = episode_length * dt - dt
         self.g = 9.81  # m/s**2, gravitational constant
         self.w_max = 8.0  # maximum angular velocity
@@ -144,32 +150,40 @@ class InvertedPendulum:
         cols = ["Time", "Observed", "Desired", "Actual"]
         df = pd.DataFrame(history_arr, columns=cols)
         df["Diff"] = (df["Actual"] - df["Desired"]) * 100
+        timestr = time.strftime("%Y%m%d-%H%M%S")
+        save_path = self.save_dir / f"run_history_{timestr}.csv"
+        if save:
+            df.to_csv(save_path, index=False)
+        return df
 
-    def rollout(self, runtime, disturbance_dist):
-        s = self.get_initial_state()  # initial state: (theta, omega)
-        time = np.arange(0, runtime, self.dt)
-        thetas = np.zeros(len(time))  # empty array of angles from centerline
-        omegas = np.zeros(len(time))  # empty array of angular velocities
-        xs = []
-        thetas[0] = s[0]
-        omegas[0] = s[1]
-        for i, t in enumerate(time):
-            o, a, s, x = self.step(s, disturbance_dist)
-            thetas[i] = s[0]
-            omegas[i] = s[1]
-            xs.append(x)
-        return thetas, omegas, xs
+    def rollout(self, disturbance_distribution, save=False):
+        self.reset()
+        done = False
+        while not done:
+            x = disturbance_distribution.sample()
+            obs, truncated = self.step(disturbance=x)
+            done = truncated
+        if save:
+            self.render(save=True)
 
-    def check_spec(self, trajectory):
-        """Checks if a trajectory is within spec
+        return self.render(save=False)
+
+    def run_rollouts(self, disturbance_distribution, m, psi):
+        """Runs m rollouts and saves the results.
 
         Args:
-            trajectory (Numpy Array): array of theta values over course of rollout
-
-        Returns:
-            bool: True if all elements of the trajectory are within spec
+            disturbance_distribution (disturbance distribution)
+            m (int): Number of rollouts to run.
+            psi (function): Specification to check if rollout was success or failure. Should return an array of bools.
         """
-        return (np.abs(trajectory) <= np.pi / 4).all()
+        histories = []
+        results = np.zeros(m, dtype=bool)
+        for i in tqdm(range(m)):
+            history = self.rollout(disturbance_distribution)
+            histories.append(history)
+            results[i] = psi(history)
+
+        return histories, results
 
 
 if __name__ == "__main__":

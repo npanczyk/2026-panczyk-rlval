@@ -1,18 +1,21 @@
 import numpy as np
 
 
-def check_spec(history, threshold):
+def check_spec(history, threshold, percent=True):
     """Checks if a rollout's power trajectory stays within 3% (relative) of desired power.
 
     Args:
         history (pd.DataFrame): rollout history with 'Actual' and 'Desired' columns
         threshold (float): specficiation value for percent difference limit
-
+        percent (bool): True to use a percent deviation from the "Desired" column in history. Otherwise uses threshold as a flat value
     Returns:
         bool: True if actual power never deviates >=3% (relative) from desired power
     """
-    pct_dev = np.abs((history["Actual"] - history["Desired"]) / history["Desired"])
-    return (pct_dev < threshold).all()
+    if percent:
+        dev = np.abs((history["Actual"] - history["Desired"]) / history["Desired"])
+    else:
+        dev = np.abs((history["Actual"]))
+    return (dev < threshold).all()
 
 
 def percent_diff(actual, desired):

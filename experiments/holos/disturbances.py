@@ -33,7 +33,7 @@ class Do:
         """Gets the log-likelihood of an observation disturbance
 
         Args:
-            xo (Do object): Observation disturbance to quantify the log likelihood for
+            xo (dict): Observation disturbance to quantify the log likelihood for
 
         Returns:
             float: log likelihood value
@@ -59,24 +59,26 @@ class Da:
             observation (dict, optional): Current observation. Defaults to None.
 
         Returns:
-            numpy array: 8 element array with disturbances for dtheta
+            dict: dictionary containing an 8 element array with disturbances for dtheta, keyed by "dtheta"
         """
         return {"dtheta": self.dtheta_dd.rvs(size=8)}
 
     def logpdf(self, xa):
-        """Gets the log-likelihood of an observation disturbance
+        """Gets the log-likelihood of an action disturbance
 
         Args:
             xa (Da object): Action disturbance to quantify the log likelihood for
 
         Returns:
-            float: log likelihood value
+            float: log-likelihood value
         """
         return self.dtheta_dd.logpdf(xa["dtheta"]).sum()
 
 
 class Ds:
-    "State distribution for the HolosMulti env. Requires standard deviations for Gaussian distributions of disturbances for power (p), change in power (dp), and drum angle (drum_angles)."
+    "State disturbance distribution for the HolosMulti env. Requires standard deviations for Gaussian distributions of disturbances for power (p), change in power (dp), and drum angle (drum_angles)."
+
+    ## *SHOULD WE ADD POWER, DP, AND DRUM ANGLES HERE? CURRENTLY ONLY CONSIDERING AUX VARIABLES
 
     def __init__(
         self,

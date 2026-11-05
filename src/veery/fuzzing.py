@@ -1,5 +1,7 @@
 from scipy.stats import norm
 import numpy as np
+import matplotlib.pyplot as plt
+from pathlib import Path
 
 
 class ZeroDist:
@@ -58,7 +60,7 @@ class DisturbanceDistribution:
         self.Da = Da
         self.Ds = Ds
 
-    def sample(self, state, action):
+    def sample(self, state=None, action=None):
         return Disturbance(
             self.Do.sample(state), self.Da.sample(action), self.Ds.sample(state, action)
         )
@@ -66,3 +68,21 @@ class DisturbanceDistribution:
     def logpdf(self, x):
         # gets the log-likelihood for the disturbance, depending on the disturbance distribution
         return self.Do.logpdf(x.xo), self.Da.logpdf(x.xa), self.Ds.logpdf(x.xs)
+
+    def plot_samples(self, dist_type, variable, n_samples=1000, save_path=None):
+        """Plots N samples for a given distribution and variable of interest.
+
+        Args:
+            d_type (Disturbance and type): One of disturbance.Do, disturbance.Da, or disturbance.Ds
+            variable (str): Variable name from the disturbance of interest (application dependent)
+            n_samples (int, optional): Number of samples to take. Defaults to 1000.
+            save_path (str, optional): Folder path where the figure should save to. Defaults to None and just shows the figure.
+        """
+        fig, ax = plt.subplots()
+        samples = [dist_type.sample()[variable] for i in range(n_samples)]
+        ax.hist(samples, 100)
+        if save_path:
+            Path(save_path).mkdir(exist_ok=True)
+            fig.savefig(f"{save_path}/sample_dist.png", dpi=300)
+        else:
+            fig.show()

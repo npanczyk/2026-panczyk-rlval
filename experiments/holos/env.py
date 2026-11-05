@@ -117,7 +117,7 @@ class HolosMulti(gym.Env):
         """Converts internal state to observation format (recommended per gym docs)
 
         Args:
-            xo (dict, optional): observation disturbance with keys dp, p, and drum_angles
+            xo (dict): observation disturbance with keys dp, p, and drum_angles
 
         Returns: dp, p, drum angles, pnext as a dictionary
 

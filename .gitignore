@@ -222,5 +222,5 @@ __marimo__/
 
 .vscode
 
-experiments/holos/models
-experiments/holos/results
+models/
+results/

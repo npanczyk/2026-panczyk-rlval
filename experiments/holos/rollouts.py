@@ -46,18 +46,9 @@ def rollout(
 
     if save_histories:
         return test_env.render(save=True)
+    # CONSIDER DELETING THIS ELSE STATEMENT
     else:
         return test_env.render(save=False)
-
-
-#     if save_histories:
-#         mae, cae, control_effort, mean_control_effort = metrics(history)
-#         print(
-#             f"{save_dir.name} - MAE: {mae}, CAE: {cae}, "
-#             f"Control Effort: {control_effort}, "
-#             f"Mean Control Effort: {mean_control_effort}"
-#         )
-#     return history
 
 
 def run_rollouts(test_profile, model_name, run_name, m, p_sig=0.01, psi=check_spec):
@@ -109,31 +100,6 @@ def run_rollouts(test_profile, model_name, run_name, m, p_sig=0.01, psi=check_sp
     )
 
     return histories, results
-
-
-# def rollout_from_snapshot(env, model, snapshot, disturbance_distribution):
-#     """Runs a rollout of the model from a snapshot for MCTS.
-
-#     Args:
-#         env (holos multi environment): _description_
-#         model (sb3.PPO model object): loaded pre-trained model used on the entire rollout
-#         snapshot (dict): snapshot of the environment state
-#         disturbance_distribution (Disturbance object from fuzzing.py)
-#     Returns:
-#         tuple: actual power over rollout, desired power over rollout
-#     """
-#     observation = env.set_snapshot(snapshot)
-#     p_actual_list = []
-#     p_desired_list = []
-#     done = False
-#     while env.time < env.runtime and not done:
-#         action, _ = model.predict(observation, deterministic=True)
-#         x = disturbance_distribution.sample(env.state, action)
-#         observation, _, terminated, truncated, _ = env.step(action, disturbance=x)
-#         p_desired_list.append(float(env.profile(env.time)))
-#         p_actual_list.append(env._p)
-#         done = terminated or truncated
-#     return p_actual_list, p_desired_list
 
 
 def overlapping_rollouts(test_profile, model_name, run_name):
