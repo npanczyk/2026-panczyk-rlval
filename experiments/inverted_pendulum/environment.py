@@ -3,9 +3,32 @@ from scipy.stats import norm
 from helpers import clamp
 import pandas as pd
 from veery import accessories
-from time import time
+import time
 from pathlib import Path
 from tqdm import tqdm
+
+
+class PendulumController:
+    """Proportional Controller for the inverted pendulum system"""
+
+    def __init__(self):
+        self.alpha = np.array(
+            [[-15, -8]]
+        )  # (1 x 2) gain matrix for proportional control
+
+    def predict(self, observation, deterministic=True):
+        """Prediction method to match SB3 interface.
+
+        Args:
+            observation (dict): with keys "theta" and "omega"
+            deterministic (bool, optional): unused, just needed to match SB3 formatting for MCTS. Defaults to True.
+
+        Returns:
+            torque, None: action and placeholder for MCTS
+        """
+        observation_matrix = np.array([[observation["theta"]], [observation["omega"]]])
+        torque = self.alpha @ observation_matrix
+        return torque[0][0], None
 
 
 class InvertedPendulum:
@@ -14,16 +37,13 @@ class InvertedPendulum:
         self.l = l  # length of the pendulum
         self.dt = dt  # time step in seconds
         self.episode_length = episode_length  # in seconds
-        self.save_dir = save_dir  # where to save results
         # check the path and make sure it's valid
-        Path(save_dir).mkdir(parents=True, exist_ok=True)
+        self.save_dir = Path(save_dir)
+        self.save_dir.mkdir(parents=True, exist_ok=True)
         self.runtime = episode_length * dt - dt
         self.g = 9.81  # m/s**2, gravitational constant
         self.w_max = 8.0  # maximum angular velocity
         self.a_max = 2.0  # maximum applicable torque
-        self.alpha = np.array(
-            [[-15, -8]]
-        )  # (1 x 2) gain matrix for proportional control
         # define a constant profile so that we can calculate robustness
         self.profile = lambda t: 0
 
@@ -31,10 +51,15 @@ class InvertedPendulum:
         self.time = 0
         theta0 = np.random.uniform(-np.pi / 16, np.pi / 16)
         w0 = np.random.uniform(-1.0, 1.0)
-        self.state = np.array([theta0, w0])
+        # np.float64 keeps .item()/.copy() working on observations (as when state was an array)
+        self.state = {
+            "theta": np.float64(theta0),
+            "omega": np.float64(w0),
+            "runtime": self.runtime,
+        }
         # do not fuzz the initial conditions
         xo = {"theta": 0, "omega": 0}
-        observation = self._get_observation(xo, reset=True)
+        observation = self._get_observation(xo)
         self._log_history(observation=observation, init=True)
         self._last_observation = observation
         return observation
@@ -44,7 +69,10 @@ class InvertedPendulum:
         # grab disturbance distribution from init and sample
         # s = np.array([[s[0]], [s[1]]])
         # return s + xo
-        return {"theta": self._theta + xo["theta"], "omega": self._omega + xo["omega"]}
+        return {
+            "theta": self.state["theta"] + xo["theta"],
+            "omega": self.state["omega"] + xo["omega"],
+        }
 
     def _log_history(self, observation, init=False):
         if init:
@@ -53,7 +81,7 @@ class InvertedPendulum:
                     self.time,
                     observation["theta"].item(),  # observed angle
                     self.profile(self.time),  # desired angle
-                    self.state[0],  # actual angle
+                    self.state["theta"],  # actual angle
                 ]
             ]
         else:
@@ -62,34 +90,24 @@ class InvertedPendulum:
                     self.time,
                     observation["theta"].item(),  # observed angle
                     self.profile(self.time),  # desired angle
-                    self.state[0],  # actual angle
+                    self.state["theta"],  # actual angle
                 ]
             )
             return
 
-    def _get_action(self, disturbance):
-        # proportional counter
-        # take the dot product of the gain matrix and the observation
-        xa = disturbance.xa
-        # use the last observation
-        obs = self._last_observation
-        observation_matrix = np.array([[obs["theta"]], [obs["omega"]]])
-        torque = self.alpha @ observation_matrix
-        return torque[0][0] + xa["torque"]
-
-    def step(self, disturbance):
+    def step(self, action, disturbance):
         """Gets values for the next state.
 
         Args:
             disturbance (Disturbance): noise value for the step
         Returns:
-            None
+            observation, truncated, None, None, None: matching SB3 output format for compatibility with MCTS
         """
-        # get the action (this will use the last stored observation)
-        action = self._get_action(disturbance)
+        # fuzz the action
+        action = action + disturbance.xa["torque"]
         # grab the state disturbance
         xs = disturbance.xs
-        theta, omega = self.state[0], self.state[1]
+        theta, omega = self.state["theta"], self.state["omega"]
         dt, g, m, l = self.dt, self.g, self.m, self.l
         action = clamp(action, -1 * self.a_max, self.a_max)
         omega = (
@@ -98,9 +116,10 @@ class InvertedPendulum:
         theta = theta + omega * dt
         omega = clamp(omega, -1 * self.w_max, self.w_max)
         # update time
-        self.time += 1
+        self.time += self.dt
         # update state
-        self.state = np.array([theta + xs["theta"], omega + xs["omega"]])
+        self.state["theta"] = np.float64(theta + xs["theta"])
+        self.state["omega"] = np.float64(omega + xs["omega"])
         # observe the state
         observation = self._get_observation(disturbance.xo)
         self._log_history(observation=observation, init=False)
@@ -111,39 +130,43 @@ class InvertedPendulum:
         truncated = False
         if self.time > self.runtime:
             truncated = True
-        return observation, truncated
+        return observation, truncated, None, None, None
 
     def get_snapshot(self):
         return {
             "time": self.time,
-            "state": self.state.copy(),
+            "runtime": self.state["runtime"],
+            "state": dict(self.state),
             "observation": {k: v.copy() for k, v in self._last_observation.items()},
             "last_history_row": list(self.history[-1]),
         }
 
     def set_snapshot(self, snap):
         self.time = snap["time"]
-        self.state = snap["state"].copy()
+        self.state = dict(snap["state"])
         self.history = [list(snap["last_history_row"])]
         self._last_observation = {k: v.copy() for k, v in snap["observation"].items()}
         # re-generate the observation dict here to prevent future corruptions from modifying an attribute
         return {k: v.copy() for k, v in snap["observation"].items()}
 
-    def rollout_from_snapshot(self, snap, disturbance_distribution):
+    def rollout_from_snapshot(self, model, snap, disturbance_distribution):
         observation = self.set_snapshot(snap)
         actual_theta = []
         desired_theta = []
         done = False
         while self.time < self.runtime and not done:
+            action, _ = model.predict(observation)
             x = disturbance_distribution.sample()
-            observation, truncated = self.step(disturbance=x)
-            actual_theta.append(self.state[0])
+            observation, truncated, _, _, _ = self.step(action=action, disturbance=x)
+            actual_theta.append(self.state["theta"])
             desired_theta.append(self.profile(self.time))
             done = truncated
         return actual_theta, desired_theta
 
-    def state_robustness(self, threshold):
-        return accessories.robustness(self.state[0], self.profile(self.time))
+    def state_robustness(self, threshold, percent=True):
+        return accessories.robustness(
+            self.state["theta"], self.profile(self.time), threshold, percent=percent
+        )
 
     def render(self, save=True):
         history_arr = np.array(self.history)
@@ -156,19 +179,21 @@ class InvertedPendulum:
             df.to_csv(save_path, index=False)
         return df
 
-    def rollout(self, disturbance_distribution, save=False):
+    def rollout(self, model, disturbance_distribution, save=False):
         self.reset()
+        observation = self._last_observation
         done = False
         while not done:
+            action, _ = model.predict(observation)
             x = disturbance_distribution.sample()
-            obs, truncated = self.step(disturbance=x)
+            observation, truncated, _, _, _ = self.step(action=action, disturbance=x)
             done = truncated
         if save:
             self.render(save=True)
 
         return self.render(save=False)
 
-    def run_rollouts(self, disturbance_distribution, m, psi):
+    def run_rollouts(self, model, disturbance_distribution, m, psi):
         """Runs m rollouts and saves the results.
 
         Args:
@@ -179,9 +204,9 @@ class InvertedPendulum:
         histories = []
         results = np.zeros(m, dtype=bool)
         for i in tqdm(range(m)):
-            history = self.rollout(disturbance_distribution)
+            history = self.rollout(model, disturbance_distribution)
             histories.append(history)
-            results[i] = psi(history)
+            results[i] = psi(history, threshold=np.pi / 4)
 
         return histories, results
 

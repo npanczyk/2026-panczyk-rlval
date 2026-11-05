@@ -333,13 +333,16 @@ class HolosMulti(gym.Env):
             done = terminated or truncated
         return actual_power, desired_power
 
-    def state_robustness(self, threshold):
+    def state_robustness(self, threshold, percent=True):
         """Gets the robustness of the current state
 
         Args:
             threshold (float): threshold for percent deviation from desired power
+            percent (bool): True if threshold is a fractional deviation from desired power, False if it is a flat deviation
         """
-        return accessories.robustness(self._p, self.profile(self.time), threshold)
+        return accessories.robustness(
+            self._p, self.profile(self.time), threshold, percent=percent
+        )
 
     def render(self, save=True):
         """Converts the history list of lists into a dataframe."""

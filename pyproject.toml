@@ -29,6 +29,6 @@ Repository = "https://github.com/npanczyk/2026-panczyk-rlval"
 dev = ["pytest"]
 experiments = ["stable-baselines3[extra]", "tensorboard", "gymnasium==1.3.0"]
 
-[tool.pytests.ini_options]
+[tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["experiments"]

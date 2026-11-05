@@ -112,18 +112,33 @@ def plot_overlapping_rollouts(
     return fig
 
 
-def plot_tree(tree, profile=None, threshold=None, save_path=None):
-    """_summary_
+def plot_tree(
+    tree,
+    spec_var,
+    profile=None,
+    threshold=None,
+    percent=True,
+    save_path=None,
+    ylabel="Value of Interest",
+    profile_label="Desired Profile",
+):
+    """Plots every MCTS tree edge as the specification variable vs time. Edges on failing paths are red, and edges with more visits are drawn thicker and darker.
 
     Args:
-        tree (_type_): _description_
-        profile (_type_, optional): _description_. Defaults to None.
-        threshold (_type_, optional): _description_. Defaults to None.
-        save_path (_type_, optional): _description_. Defaults to None.
+        tree (list[Node]): all nodes in the MCTS tree; tree[0] is the root
+        spec_var (str or callable): the variable used in the specification. A str is looked up as a top-level key of each node's snapshot (e.g. "_p" for Holos). A callable takes a snapshot and returns the value (e.g. lambda s: s["state"]["theta"] for the inverted pendulum).
+        profile (callable, opt): desired value as a function of time. Defaults to None and doesn't plot the profile.
+        threshold (float, opt): deviation from the profile allowed by the spec, drawn as a band around the profile. Only used if profile is given. Defaults to None.
+        percent (bool, opt): True if threshold is a fractional deviation from the profile, False if it is a flat value (same meaning as in check_spec). Defaults to True.
+        save_path (str, opt): file path for the saved figure. Defaults to None and doesn't save the figure.
+        ylabel (str, opt): y-axis label text. Defaults to "Value of Interest".
+        profile_label (str, opt): legend label for the profile line. Defaults to "Desired Profile".
 
     Returns:
-        _type_: _description_
+        tuple[matplotlib.figure.Figure, matplotlib.axes.Axes]
     """
+    get_value = spec_var if callable(spec_var) else (lambda snap: snap[spec_var])
+
     fig, ax = plt.subplots(figsize=(10, 5))
     max_n = max(n.N for n in tree)
     for node in tree:
@@ -132,7 +147,7 @@ def plot_tree(tree, profile=None, threshold=None, save_path=None):
         w = node.N / max_n  # visit share, 0-1
         ax.plot(
             [node.parent.state["time"], node.state["time"]],
-            [node.parent.state["_p"], node.state["_p"]],
+            [get_value(node.parent.state), get_value(node.state)],
             color="red" if node.path_rho < 0 else "tab:blue",
             alpha=0.3 + 0.7 * w,
             linewidth=0.5 + 2.5 * w,
@@ -142,19 +157,21 @@ def plot_tree(tree, profile=None, threshold=None, save_path=None):
         t_max = max(n.state["time"] for n in tree)
         ts = np.linspace(0, t_max, 200)
         desired = np.array([float(profile(t)) for t in ts])
-        ax.plot(ts, desired, "k--", label="Prescribed Power Profile")
+        ax.plot(ts, desired, "k--", label=profile_label)
         if threshold is not None:
+            # a relative band collapses to zero width when the profile is 0 (e.g. an upright pendulum)
+            half_width = desired * threshold if percent else threshold
             ax.fill_between(
                 ts,
-                desired * (1 - threshold),
-                desired * (1 + threshold),
+                desired - half_width,
+                desired + half_width,
                 color="green",
                 alpha=0.15,
                 label="Specification Region",
             )
         ax.legend()
     ax.set_xlabel("Time, [s]")
-    ax.set_ylabel("Power Fraction, [-]")
+    ax.set_ylabel(ylabel)
     # ax.set_title(f"MCTS tree ({len(tree)} nodes)")
     if save_path:
         fig.savefig(save_path, dpi=400, bbox_inches="tight")
@@ -162,6 +179,15 @@ def plot_tree(tree, profile=None, threshold=None, save_path=None):
 
 
 def plot_tree_structure(tree, save_path=None):
+    """Plots the MCTS tree topology vs time, independent of the problem. Node size is the visit count, color is Q, and failing nodes are marked with a red x.
+
+    Args:
+        tree (list[Node]): all nodes in the MCTS tree; tree[0] is the root
+        save_path (str, opt): file path for the saved figure. Defaults to None and doesn't save the figure.
+
+    Returns:
+        tuple[matplotlib.figure.Figure, matplotlib.axes.Axes]
+    """
     # y layout: leaves get consecutive rows, parents sit at the mean of their children
     # (iterative post-order, since episode depth can exceed Python's recursion limit)
     y, slot = {}, 0

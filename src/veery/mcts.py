@@ -32,7 +32,17 @@ def lcb(node, c):
 
 class MCTS:
     def __init__(
-        self, c, k, alpha, lam, disturbance_dist, k_max, environment, model, threshold
+        self,
+        c,
+        k,
+        alpha,
+        lam,
+        disturbance_dist,
+        k_max,
+        environment,
+        model,
+        threshold,
+        percent=True,
     ):
         self.c = c  # exploration constant
         self.k = k  # progressive widening constant
@@ -45,6 +55,7 @@ class MCTS:
         self.environment = environment
         self.model = model
         self.threshold = threshold  # specification threshold
+        self.percent = percent  # whether threshold is a fractional or flat deviation
 
     def initialize_tree(self):
         # reset the environment
@@ -84,7 +95,12 @@ class MCTS:
                 disturbance_distribution=self.disturbance_dist,
             )
             # we want the robustness to be the min robustness of the whole trajectory, including parent nodes, so check for min between path and sampled rollout
-            rho_list.append(min(path_rho, robustness(actual, desired, self.threshold)))
+            rho_list.append(
+                min(
+                    path_rho,
+                    robustness(actual, desired, self.threshold, percent=self.percent),
+                )
+            )
 
         avg_rho = np.mean(np.array(rho_list))
 
@@ -132,7 +148,9 @@ class Node:
         # take a snapshot of the environment at this updated state
         snapshot = alg.environment.get_snapshot()
         # get the robustness margin for this step
-        rho_step = alg.environment.state_robustness(threshold=alg.threshold)
+        rho_step = alg.environment.state_robustness(
+            threshold=alg.threshold, percent=alg.percent
+        )
         # update the child's path robustness based on this step
         child_path_rho = min(self.path_rho, rho_step)
 
@@ -250,6 +268,7 @@ def run_MCTS(
     threshold,
     iterations=100,
     hyperparams=None,
+    percent=True,
 ):
     """Runs Monte Carlo Tree Search for number of defined iterations.
 
@@ -262,6 +281,7 @@ def run_MCTS(
         threshold (_type_): _description_
         iterations (int, optional): _description_. Defaults to 100.
         hyperparams (_type_, optional): _description_. Defaults to None.
+        percent (bool, optional): True if threshold is a fractional deviation from the profile, False if it is a flat deviation. Defaults to True.
     """
     # check the path and make folders if necessary
     Path(results_path).mkdir(parents=True, exist_ok=True)
@@ -285,6 +305,7 @@ def run_MCTS(
         environment=environment,
         model=model,
         threshold=threshold,  # error tolerance for determining failures
+        percent=percent,
     )
 
     tree = alg.initialize_tree()

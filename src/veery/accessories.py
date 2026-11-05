@@ -7,14 +7,14 @@ def check_spec(history, threshold, percent=True):
     Args:
         history (pd.DataFrame): rollout history with 'Actual' and 'Desired' columns
         threshold (float): specficiation value for percent difference limit
-        percent (bool): True to use a percent deviation from the "Desired" column in history. Otherwise uses threshold as a flat value
+        percent (bool): True to use a percent deviation from the "Desired" column in history. Otherwise uses threshold as a flat deviation from "Desired"
     Returns:
         bool: True if actual power never deviates >=3% (relative) from desired power
     """
     if percent:
         dev = np.abs((history["Actual"] - history["Desired"]) / history["Desired"])
     else:
-        dev = np.abs((history["Actual"]))
+        dev = np.abs(history["Actual"] - history["Desired"])
     return (dev < threshold).all()
 
 
@@ -22,13 +22,14 @@ def percent_diff(actual, desired):
     return abs(actual - desired) / desired
 
 
-def robustness(actual, desired, threshold):
+def robustness(actual, desired, threshold, percent=True):
     """Calculates the robustness of a trajectory defined by the actual power and the desired power for all timesteps. This is based on signal temporal logic.
 
     Args:
         actual (array): Actual achieved output
         desired (array): Desired output at corresponding times to actual
-        threshold (float): power specification as a percent deviation from profile
+        threshold (float): specification as a deviation from profile
+        percent (bool): True if threshold is a fractional deviation from desired. Otherwise threshold is a flat deviation, which must be used when desired can be 0.
     """
     # if we're at a terminal node, we won't get power arrays, so return infinity (we're going to take a min of this rho and the path rho, so path rho will always get picked if we're at a terminal node)
     if type(actual) != list:
@@ -37,6 +38,8 @@ def robustness(actual, desired, threshold):
         desired = np.array([desired])
     if len(actual) == 0:
         return np.inf
-    percent_diffs = abs(np.array(actual) - np.array(desired)) / np.array(desired)
-    rho = np.min(threshold - percent_diffs)
+    diffs = abs(np.array(actual) - np.array(desired))
+    if percent:
+        diffs = diffs / np.array(desired)
+    rho = np.min(threshold - diffs)
     return rho
