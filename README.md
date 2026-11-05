@@ -1,4 +1,23 @@
-# 2026-panczyk-rlval
-Validation methods for a reinforcement learner trained to follow power profiles in the HolosQuad Microreactor. 
+# veery - a Validation Environment for Exposing RiskY models
 
-Includes methods and results for the 2027 ANS Math &amp; Computation Conference
+# Installation
+To run all capabilities, install dependencies via:
+
+```
+pip install -e ".[dev,experiments]"
+```
+
+# Defining an environment
+
+To run veery methods on any problem, you first must create an environment (as a class) for that problem. The environment class must contain the following attributes:
+-  `profile(time)` a function that returns a desired variable value when given a time. 
+- 
+
+The environment must also contain the following methods:
+- reset()
+- _get_observation()
+- _log_history()
+- step()
+- get_snapshot()
+- set_snapshot()
+- rollout_from_snapshot()

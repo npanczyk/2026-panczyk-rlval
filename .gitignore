@@ -219,3 +219,8 @@ __marimo__/
 *.pdf
 
 /workflow/scripts/run_histories
+
+.vscode
+
+models/
+results/

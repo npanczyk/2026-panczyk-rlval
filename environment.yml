@@ -1,16 +1,8 @@
-name: mc26
+name: veery
 channels:
   - conda-forge
-  - defaults
 dependencies:
   - python=3.12
-  - numpy
-  - pandas
-  - scipy
   - pip
-  - matplotlib
-  - tensorboard
   - pip:
-    - gymnasium==1.3.0
-    - pytest
-    - stable-baselines3[extra]
+      - -e ".[dev,experiments]"
