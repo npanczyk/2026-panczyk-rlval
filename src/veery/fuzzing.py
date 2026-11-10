@@ -34,6 +34,62 @@ class ZeroDist:
         return np.zeros(1)
 
 
+def gaussian(sigma, mean=0):
+    """Wrapper for normal distribution that handles the zero distribution (when sigma is 0).
+
+    Args:
+        sigma (float): Standard deviation of the distribution
+        mean (int, optional): Mean of the distribution. Defaults to 0.
+
+    Returns:
+        distribution object: either a ZeroDist() object or scipy.stats.norm instance
+    """
+    if sigma == 0:
+        return ZeroDist()
+    else:
+        return norm(mean, sigma)
+
+
+class DisturbedVariable:
+    """Sets the template for a disturbance variable that contains that variable's distribution (gaussian, uniform, etc.) and its size"""
+
+    def __init__(self, distribution, size=None):
+        self.distribution = distribution
+        self.size = size
+
+
+class ComponentDistribution:
+    """Disturbance distribution class for Do, Da, or Ds, each containing independent named variables from the Variable class."""
+
+    def __init__(self, variables_dict):
+        self.variables = variables_dict  # dictionary of the form: {name: variable, name: variable, etc.}
+
+    def sample(self, *dependencies):
+        """Gets randomly generated samples for a disturbance distribution.
+        Note: dependencies are state/action/observation information that can be overriden by a subclass-specific sample() method
+
+        Returns:
+            dict: keys are the names of the variables, values are the samples
+        """
+        return {
+            name: var.distribution.rvs(size=var.size)
+            for name, var in self.variables.items()
+        }
+
+    def logpdf(self, x):
+        """Gets the logpdf for a disturbance.
+
+        Args:
+            x (dict): dictionary where the keys are the names of the variables and the values are the disturbances in the same format as sample() outputs
+        Returns:
+            float: the sum of the logpdf of each variable's disturbance
+        """
+        loglikelihood = 0
+        for name, var in self.variables.items():
+            loglikelihood += np.sum(var.distribution.logpdf(x[name]))
+        return loglikelihood
+
+
 class Disturbance:
     def __init__(self, xo, xa, xs):
         """
@@ -70,19 +126,26 @@ class DisturbanceDistribution:
         return self.Do.logpdf(x.xo), self.Da.logpdf(x.xa), self.Ds.logpdf(x.xs)
 
     def plot_samples(self, dist_type, variable, n_samples=1000, save_path=None):
-        """Plots N samples for a given distribution and variable of interest.
+        """Plots a histogram of N samples for one variable of one component distribution.
 
         Args:
-            d_type (Disturbance and type): One of disturbance.Do, disturbance.Da, or disturbance.Ds
-            variable (str): Variable name from the disturbance of interest (application dependent)
+            dist_type (ComponentDistribution): One of self.Do, self.Da, or self.Ds
+            variable (str): Variable name from the component distribution of interest (application dependent)
             n_samples (int, optional): Number of samples to take. Defaults to 1000.
             save_path (str, optional): Folder path where the figure should save to. Defaults to None and just shows the figure.
         """
         fig, ax = plt.subplots()
-        samples = [dist_type.sample()[variable] for i in range(n_samples)]
+        # ravel so vector variables (e.g. 8 drum angles) are pooled into one histogram
+        samples = np.concatenate(
+            [np.ravel(dist_type.sample()[variable]) for i in range(n_samples)]
+        )
         ax.hist(samples, 100)
+        ax.set_xlabel(f"{variable} disturbance")
+        ax.set_ylabel("Count")
         if save_path:
-            Path(save_path).mkdir(exist_ok=True)
-            fig.savefig(f"{save_path}/sample_dist.png", dpi=300)
+            Path(save_path).mkdir(parents=True, exist_ok=True)
+            # name the file by variable so plotting several variables doesn't overwrite one file
+            fig.savefig(f"{save_path}/{variable}_sample_dist.png", dpi=300)
+            plt.close(fig)
         else:
-            fig.show()
+            plt.show()

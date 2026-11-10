@@ -21,3 +21,14 @@ The environment must also contain the following methods:
 - get_snapshot()
 - set_snapshot()
 - rollout_from_snapshot()
+
+# Creating fuzzy variables (disturbances)
+The structure for creating disturbances in `veery` is as follows:
+
+```
+DisturbanceDistribution          → samples a Disturbance(xo, xa, xs)
+ ├─ Do: ComponentDistribution    → samples xo = {name: value}
+ │    └─ {name: DisturbedVariable(gaussian(σ), size)}
+ ├─ Da: ComponentDistribution
+ └─ Ds: ComponentDistribution
+```
