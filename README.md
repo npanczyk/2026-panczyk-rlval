@@ -1,10 +1,10 @@
 # veery — a Validation Environment for Exposing RiskY models
 
-veery is a Python library for **falsifying controllers**, especially reinforcement-learning (RL) controllers. Given a controlled system and a specification, it searches for disturbance sequences (sensor noise, actuator noise, and environment perturbations) that make the system violate its spec. It then ranks the failures it finds by how likely they are.
+veery is a Python library for **falsifying controllers**, especially reinforcement-learning (RL) controllers. Given a controlled system and a specification, it searches for disturbance sequences (sensor noise, actuator noise, and environment perturbations) that cause a system violate its specifications by some threshold value.
 
-The search uses Monte Carlo Tree Search (MCTS) guided by a signal temporal logic (STL) robustness score (ρ < 0 means a failure).
+In addition to naive sampling, veery provides a targeted search for more likely failures using Monte Carlo Tree Search (MCTS).
 
-The main case study is an RL controller for the Holos-Quad microreactor (adapted from [Tunkle et al., 2025](https://github.com/aims-umich/microdrum-marl)). A simpler inverted pendulum example is included for teaching.
+The main case study is an RL controller for the Holos-Quad microreactor (adapted from [Tunkle et al., 2025](https://github.com/aims-umich/microdrum-marl)). We include a simpler inverted pendulum example for demonstration purposes. The falsification framework defined in this repo is based on that defined in *Algorithms for Validation* by [Kochenderfer et al.] (https://algorithmsbook.com/validation/).
 
 ## Installation
 
@@ -73,7 +73,7 @@ If you want to use `check_spec` or the rollout plots, also log a `history` DataF
 
 ### Model
 
-Any object with an SB3-style `predict(observation, deterministic=True)` that returns `(action, state)`. A trained stable-baselines3 policy works directly. So does a hand-written controller (see `PendulumController`).
+Any object with an SB3-style `predict(observation, deterministic=True)` that returns `(action, state)`. A trained stable-baselines3 policy works directly. We demonstrate a simpler model via a proportional controller for the Inverted Pendulum system (see `PendulumController`).
 
 ### Disturbances
 
@@ -85,7 +85,7 @@ DisturbanceDistribution          → sample() returns Disturbance(xo, xa, xs)
       └─ {name: DisturbedVariable(distribution, size)}
 ```
 
-Define each component by subclassing `ComponentDistribution`:
+Define each component's disturbance distribution by subclassing `ComponentDistribution`:
 
 ```python
 from veery.fuzzing import ComponentDistribution, DisturbedVariable, gaussian
@@ -98,7 +98,7 @@ class Do(ComponentDistribution):
         })
 ```
 
-`gaussian(0)` returns a `ZeroDist`, so a zero-sigma component samples zeros and has a well-defined log-likelihood. To check a distribution, call `D.plot_samples(D.Do, "p")`. If a disturbance depends on state or action, override `sample()` in your subclass.
+`gaussian(0)` returns a `ZeroDist`, so a zero-sigma component samples zeros and has a "dummy" log-likelihood value of 0. To check a distribution, call `D.plot_samples(D.Do, "p")`. If a disturbance depends on state or action, you can override `sample()` in your subclass to accept those conditional values.
 
 ## Running MCTS
 
@@ -121,10 +121,10 @@ The node score is the mean rollout robustness minus λ·log-likelihood. MCTS min
 
 ## Examples
 
-- **`experiments/holos/`**: Holos-Quad microreactor. Gym environment (`HolosMulti`), point-kinetics model, power profiles, and SB3 training (`python train.py`). Walkthrough in `holos_tutorial.ipynb`.
-- **`experiments/inverted_pendulum/`**: inverted pendulum with a proportional controller (no RL). Walkthrough in `pendulum_tutorial.ipynb`.
+- **`experiments/holos/`**: Holos-Quad microreactor. Gym environment (`HolosMulti`), point-kinetics model, power profiles, and SB3 training (`python train.py`). Demo in `holos_tutorial.ipynb`.
+- **`experiments/inverted_pendulum/`**: inverted pendulum with a proportional controller (no RL). Demo in `pendulum_tutorial.ipynb`.
 
-Experiment modules import each other by bare name, so run them from inside their own folder.
+Experiments should be run from inside their own folder to properly manage imports.
 
 ## Repository layout
 
@@ -135,7 +135,7 @@ src/veery/
   accessories.py  # check_spec (ψ), robustness (ρ)
   viz.py          # plotting
 experiments/      # problem-specific code (not part of the package)
-tests/            # pytest suite; conftest.py defines a toy "bakery" system
+tests/            # pytest suite
 ```
 
 ## Testing
@@ -144,10 +144,6 @@ tests/            # pytest suite; conftest.py defines a toy "bakery" system
 pytest
 ```
 
-## Current limitations
-
-- The MCTS score and failure ranking use only the **observation** disturbance's log-likelihood. Action and state disturbances are sampled and applied but not yet scored.
-- `direct_falsification.py` is a stub.
 
 ## License
 
