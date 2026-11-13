@@ -23,33 +23,7 @@ pip install -e ".[dev,experiments]"
 
 ## Quick start
 
-See `experiments/inverted_pendulum/pendulum_tutorial.ipynb` for a full walkthrough. In short:
-
-```python
-import numpy as np
-from veery.fuzzing import DisturbanceDistribution
-from veery.mcts import run_MCTS
-from veery.viz import plot_tree, plot_tree_structure
-import disturbances
-from environment import InvertedPendulum, PendulumController
-
-D = DisturbanceDistribution(
-    Do=disturbances.Do(sigma_theta=0.1, sigma_omega=0.1),  # sensor
-    Da=disturbances.Da(sigma_torque=0),                     # actuator
-    Ds=disturbances.Ds(sigma_theta=0, sigma_omega=0),       # environment
-)
-pendulum = InvertedPendulum(m=1, l=1, dt=0.05, episode_length=1000, save_dir="results/demo")
-
-tree = run_MCTS(
-    environment=pendulum,
-    model=PendulumController(),
-    disturbance_dist=D,
-    results_path="results/notebook",
-    threshold=np.pi / 4,
-    iterations=100,
-    percent=False,   # flat threshold, since the desired angle is 0
-)
-```
+See `experiments/inverted_pendulum/pendulum_tutorial.ipynb` for a full walkthrough on a simple demo problem. 
 
 ## Defining a problem
 
@@ -73,7 +47,7 @@ If you want to use `check_spec` or the rollout plots, also log a `history` DataF
 
 ### Model
 
-Any object with an SB3-style `predict(observation, deterministic=True)` that returns `(action, state)`. A trained stable-baselines3 policy works directly. We demonstrate a simpler model via a proportional controller for the Inverted Pendulum system (see `PendulumController`).
+Any object with an SB3-style `predict(observation, deterministic=True)` that returns `(action, state)`. We demonstrate a simpler model via a proportional controller for the Inverted Pendulum system (see `PendulumController`).
 
 ### Disturbances
 
@@ -85,7 +59,7 @@ DisturbanceDistribution          → sample() returns Disturbance(xo, xa, xs)
       └─ {name: DisturbedVariable(distribution, size)}
 ```
 
-Define each component's disturbance distribution by subclassing `ComponentDistribution`:
+Define each component's disturbance distribution by subclassing `ComponentDistribution`. For example, we can write the observation disturbance distribution for the HolosQuad sensors as:
 
 ```python
 from veery.fuzzing import ComponentDistribution, DisturbedVariable, gaussian
@@ -98,7 +72,7 @@ class Do(ComponentDistribution):
         })
 ```
 
-`gaussian(0)` returns a `ZeroDist`, so a zero-sigma component samples zeros and has a "dummy" log-likelihood value of 0. To check a distribution, call `D.plot_samples(D.Do, "p")`. If a disturbance depends on state or action, you can override `sample()` in your subclass to accept those conditional values.
+`gaussian(0)` returns a `ZeroDist`, so a zero-sigma component samples zeros and has a "dummy" log-likelihood value of 0. To check a distribution, you can call `D.plot_samples(D.Do, "p")`. If a disturbance depends on state or action, you can override `sample()` in your subclass to accept those conditional values.
 
 ## Running MCTS
 
@@ -110,19 +84,19 @@ class Do(ComponentDistribution):
 | `k`, `alpha` | Progressive widening: a node expands while `children ≤ k·N^alpha` | 1, 0.25 |
 | `lambda` | Weight on disturbance log-likelihood in the node score | 0.01 |
 
-The node score is the mean rollout robustness minus λ·log-likelihood. MCTS minimizes it, so it favors trajectories that are both close to failure and likely.
+The node score is the mean rollout robustness (rho) minus λ·log-likelihood of the path disturbances. This MCTS minimizes the scoring function, therefore searching for trajectories that are both close to failure and likely.
 
 **Outputs** written to `results_path`:
 - `tree.pkl`: the full search tree (list of `Node`s)
 - `failures.csv`: failures ranked by mean log-likelihood along the path
-- `failure_sequences.pkl`: the disturbance and action sequence for each failure, plus the root state, for replay
+- `failure_sequences.pkl`: the disturbance and action sequence (trajectories) for each failure
 
 **Plotting** (`veery.viz`): `plot_tree`, `plot_tree_structure`, `plot_rollouts`, `plot_overlapping_rollouts`, `plot_robustness`.
 
 ## Examples
 
 - **`experiments/holos/`**: Holos-Quad microreactor. Gym environment (`HolosMulti`), point-kinetics model, power profiles, and SB3 training (`python train.py`). Demo in `holos_tutorial.ipynb`.
-- **`experiments/inverted_pendulum/`**: inverted pendulum with a proportional controller (no RL). Demo in `pendulum_tutorial.ipynb`.
+- **`experiments/inverted_pendulum/`**: inverted pendulum with a proportional controller. Demo in `pendulum_tutorial.ipynb`.
 
 Experiments should be run from inside their own folder to properly manage imports.
 
