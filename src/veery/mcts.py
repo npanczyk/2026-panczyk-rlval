@@ -273,15 +273,17 @@ def run_MCTS(
     """Runs Monte Carlo Tree Search for number of defined iterations.
 
     Args:
-        run_name (_type_): _description_
-        environment (_type_): _description_
-        model (_type_): _description_
-        disturbance_dist (_type_): _description_
-        results_path (_type_): _description_
-        threshold (_type_): _description_
-        iterations (int, optional): _description_. Defaults to 100.
-        hyperparams (_type_, optional): _description_. Defaults to None.
+        environment (object): Problem environment that implements the veery interface (profile, state, reset, step, get_snapshot, set_snapshot, rollout_from_snapshot, state_robustness)
+        model (object): Controller with an SB3-style predict(observation, deterministic=True) method that returns (action, state)
+        disturbance_dist (DisturbanceDistribution): Distribution that disturbances are sampled from
+        results_path (str): Folder where tree.pkl, failures.csv, and failure_sequences.pkl are saved
+        threshold (float): Specification threshold, as a deviation from the profile
+        iterations (int, optional): Number of MCTS iterations (k_max). Defaults to 100.
+        hyperparams (dict, optional): MCTS hyperparameters with keys "c", "k", "alpha", and "lambda". Defaults to None, which uses c=0.5, k=1, alpha=0.25, lambda=0.01.
         percent (bool, optional): True if threshold is a fractional deviation from the profile, False if it is a flat deviation. Defaults to True.
+
+    Returns:
+        list: All nodes in the search tree, with the root at index 0
     """
     # check the path and make folders if necessary
     Path(results_path).mkdir(parents=True, exist_ok=True)
@@ -328,7 +330,3 @@ def run_MCTS(
     save_failures(tree, disturbance_dist, results_path)
 
     return tree
-
-
-if __name__ == "__main__":
-    tree = run_MCTS(iterations=10, sigma_power=0.01, exploration=0.08)
