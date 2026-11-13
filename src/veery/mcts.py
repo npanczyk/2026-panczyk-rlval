@@ -19,15 +19,23 @@ def lcb(node, c):
     Returns:
         Node: best child node to select based on LCB scores of all child nodes
     """
-    Qs = [node.Q for node in node.children]
-    Ns = [node.N for node in node.children]
+    live_children = []
+
+    for child in node.children:
+        if child.dead == False:
+            live_children.append(child)
+    # if all the children are dead, return None
+    if not live_children:
+        return None
+    Qs = [child.Q for child in live_children]
+    Ns = [child.N for child in live_children]
     lcbs = []
     for Q, N in zip(Qs, Ns):
         lcbs.append(Q - c * np.sqrt(np.log(node.N) / N))
 
     best_child_index = np.argmin(np.array(lcbs))
 
-    return node.children[best_child_index]
+    return live_children[best_child_index]
 
 
 class MCTS:
@@ -37,6 +45,7 @@ class MCTS:
         k,
         alpha,
         lam,
+        max_children,
         disturbance_dist,
         k_max,
         environment,
@@ -48,6 +57,7 @@ class MCTS:
         self.k = k  # progressive widening constant
         self.alpha = alpha  # progressive widening exponent
         self.lam = lam  # how much weight to place on the likelihood of the disturbance versus the proximity to failure (captured by rho) for the scoring function
+        self.max_children = max_children  # maximum number of children a node can have (important for avoiding getting stuck near a bunch of similar failures)
         self.disturbance_dist = (
             disturbance_dist  # sampling returns x, a disturbance object
         )
@@ -71,8 +81,17 @@ class MCTS:
             tree (list): list of nodes in the tree
         """
         node = tree[0]  # always start at the root
-        while len(node.children) > self.k * (node.N**self.alpha):
-            node = lcb(node, self.c)
+        # check progressive widening condition AND max children condition
+        while (
+            len(node.children) > self.k * (node.N**self.alpha)
+            or len(node.children) >= self.max_children
+        ):
+            selected_child = lcb(node, self.c)
+            # if all the children are dead, lcb will return None
+            # if that happens, stop earlier than a leaf and expand
+            if selected_child is None:
+                break  # get out of the while loop, we're done searching
+            node = selected_child
         return node
 
     def score(self, snapshot, x, path_rho, N=3):
@@ -118,6 +137,7 @@ class Node:
         N=0,
         Q=0,
         path_rho=np.inf,
+        dead=False,
     ):
         self.state = state
         self.parent = parent
@@ -126,9 +146,36 @@ class Node:
         self.N = N
         self.Q = Q
         self.path_rho = path_rho  # minimum robustness along the path
+        self.dead = dead  # dead means terminal or exhausted
+
+    def __repr__(self):
+        return (
+            f"Node(t={self.state['time']}, N={self.N}, Q={self.Q:.3f}, "
+            f"path_rho={self.path_rho:.3f}, children={len(self.children)})"
+        )
 
     def is_terminal(self):
         if self.state["time"] >= self.state["runtime"] or self.path_rho < 0:
+            self.dead = True
+            return True
+        else:
+            return False
+
+    def is_exhausted(self, max_children):
+        if (
+            np.all([c.dead == True for c in self.children])
+            and len(self.children) == max_children
+        ):
+            self.dead = True
+            return True
+        else:
+            return False
+
+    def is_dead(self, max_children):
+        if self.dead == True:
+            return True
+        elif self.is_terminal() or self.is_exhausted(max_children):
+            self.dead = True
             return True
         else:
             return False
@@ -168,6 +215,11 @@ class Node:
         tree.append(child_node)
         # now it's time to backpropagate!
         self.backpropagate(q)
+        # after expanding, if the child node is terminal, check if the parent is dead, and propagate that up until you reach an alive node
+        if child_node.is_terminal():
+            node = self
+            while node is not None and node.is_dead(alg.max_children):
+                node = node.parent
         return
 
     def backpropagate(self, q):
@@ -273,15 +325,17 @@ def run_MCTS(
     """Runs Monte Carlo Tree Search for number of defined iterations.
 
     Args:
-        run_name (_type_): _description_
-        environment (_type_): _description_
-        model (_type_): _description_
-        disturbance_dist (_type_): _description_
-        results_path (_type_): _description_
-        threshold (_type_): _description_
-        iterations (int, optional): _description_. Defaults to 100.
-        hyperparams (_type_, optional): _description_. Defaults to None.
+        environment (object): Problem environment that implements the veery interface (profile, state, reset, step, get_snapshot, set_snapshot, rollout_from_snapshot, state_robustness)
+        model (object): Controller with an SB3-style predict(observation, deterministic=True) method that returns (action, state)
+        disturbance_dist (DisturbanceDistribution): Distribution that disturbances are sampled from
+        results_path (str): Folder where tree.pkl, failures.csv, and failure_sequences.pkl are saved
+        threshold (float): Specification threshold, as a deviation from the profile
+        iterations (int, optional): Number of MCTS iterations (k_max). Defaults to 100.
+        hyperparams (dict, optional): MCTS hyperparameters with keys "c", "k", "alpha", and "lambda". Defaults to None, which uses c=0.5, k=1, alpha=0.25, lambda=0.01.
         percent (bool, optional): True if threshold is a fractional deviation from the profile, False if it is a flat deviation. Defaults to True.
+
+    Returns:
+        list: All nodes in the search tree, with the root at index 0
     """
     # check the path and make folders if necessary
     Path(results_path).mkdir(parents=True, exist_ok=True)
@@ -293,6 +347,7 @@ def run_MCTS(
             "k": 1,
             "alpha": 0.25,
             "lambda": 0.01,
+            "max_children": 3,
         }
 
     alg = MCTS(
@@ -300,6 +355,7 @@ def run_MCTS(
         k=hyperparams["k"],  # progressive widening constant
         alpha=hyperparams["alpha"],  # progressive widening exponent
         lam=hyperparams["lambda"],  # likelihood weight for score
+        max_children=hyperparams["max_children"],
         disturbance_dist=disturbance_dist,
         k_max=iterations,  # max iterations
         environment=environment,
@@ -311,6 +367,9 @@ def run_MCTS(
     tree = alg.initialize_tree()
 
     for i in tqdm(range(alg.k_max)):
+        if tree[0].is_dead(alg.max_children):
+            print(f"Search space exhausted after {i} iterations!")
+            break
         node = alg.select(tree)
         if node.is_terminal():
             # we need to backpropagate here so that N increases and the tree stops exploring terminal nodes
@@ -328,7 +387,3 @@ def run_MCTS(
     save_failures(tree, disturbance_dist, results_path)
 
     return tree
-
-
-if __name__ == "__main__":
-    tree = run_MCTS(iterations=10, sigma_power=0.01, exploration=0.08)
