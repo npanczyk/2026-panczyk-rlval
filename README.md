@@ -4,7 +4,7 @@ veery is a Python library for **falsifying controllers**, especially reinforceme
 
 In addition to naive sampling, veery provides a targeted search for more likely failures using Monte Carlo Tree Search (MCTS).
 
-The main case study is an RL controller for the Holos-Quad microreactor (adapted from [Tunkle et al., 2025](https://github.com/aims-umich/microdrum-marl)). We include a simpler inverted pendulum example for demonstration purposes. The falsification framework defined in this repo is based on that defined in *Algorithms for Validation* by [Kochenderfer et al.] (https://algorithmsbook.com/validation/).
+The main case study is an RL controller for the Holos-Quad microreactor (adapted from [Tunkle et al., 2025](https://github.com/aims-umich/microdrum-marl)). We include a simpler inverted pendulum example for demonstration purposes. The falsification framework defined in this repo is based on that defined in *Algorithms for Validation* by [Kochenderfer et al.](https://algorithmsbook.com/validation/).
 
 ## Installation
 
